@@ -8,7 +8,7 @@
 
 한국투자증권 계좌와 한국투자증권 OpenAPI 홈페이지에서 인증정보(App Key, App Secret)를 준비해 주세요.
 
-개발 환경 : Python 3.11 이상 권장
+개발 환경 : Python 3.13 이상 권장
 
 Claude Desktop 또는 Cursor와 같은 한국투자증권 MCP를 연결할 AI 도구를 설치해 주세요.
 
@@ -133,7 +133,7 @@ cd "$HOME\자동매매"
 
 **GitHub 링크**: https://github.com/koreainvestment/open-trading-api
 
-1. **kis_devlp.yaml** → `~/KIS/config` 폴더에 저장 **(보안 정보로 별도 관리)**
+1. **kis_devlp.yaml** → `~/kis/config` 폴더에 저장 **(보안 정보로 별도 관리)**
     
     https://github.com/koreainvestment/open-trading-api/blob/main/kis_devlp.yaml
     
@@ -148,13 +148,13 @@ cd "$HOME\자동매매"
 
 > 경로 표기 안내
 문서에서 `~`는 **내 사용자 폴더(홈)**를 뜻합니다.
-`~/{폴더명}`은 그 안의 `{폴더명}` 폴더라는 의미이며, 실제 입력은 `~/KIS/config`처럼 중괄호 없이 적습니다.
+`~/{폴더명}`은 그 안의 `{폴더명}` 폴더라는 의미이며, 실제 입력은 `~/kis/config`처럼 중괄호 없이 적습니다.
 (Windows PowerShell: `~` → `C:\Users\내이름`)
 > 
 
 ### **1-4. `중요`kis_devlp.yaml 설정**
 
-`~/KIS/config/kis_devlp.yaml` 파일에 발급받은 App key, App Secret, 계좌정보 (실전, 모의)를 입력하세요
+`~/KIS/kis_devlp.yaml` 파일에 발급받은 App key, App Secret, 계좌정보 (실전, 모의)를 입력하세요
 
 ```yaml
 #홈페이지에서 API서비스 신청시 발급 AppKey, AppSecret 값 설정
@@ -169,7 +169,7 @@ paper_sec: "발급받은_실제_APP_SECRET"   # 모의투자용 APP SECRET (실�
 # HTS ID
 my_htsid: "실제_HTS_ID"              # 한국투자증권 HTS ID 입력
 
-#계좌번호 앞 8자리
+#계좌번호 및 8자리
 my_acct_stock: "실제_계좌번호"        # 주식 계좌번호 (예: 50068418)  
 my_acct_future: "실제_계좌번호"       # 선물옵션 계좌번호 (주식과 동일 가능)
 my_paper_stock: "모의투자_계좌번호"    # 모의투자 주식 계좌번호
@@ -304,7 +304,7 @@ except Exception as e:
 ```bash
 # 실행
 cd ~/자동매매
-uv run python test_connection.py
+python test_connection.py
 
 # 결과
 ✅ API 연결 성공!
@@ -344,7 +344,7 @@ uv run python test_connection.py
 ```
 ~/KIS/
 └── config/
-    └── kis_devlp.yaml (보안 정보)
+    └── devlp.yaml (보안 정보)
 
 ~/자동매매/
 ├── kis_auth.py
@@ -358,7 +358,7 @@ uv run python test_connection.py
 
 ## Next Step
 
-설정이 완료되셨다면 이제 투자를 위한 전략을 구현하세요.
+설정이 완료되셨다면 이제 투자를 위한 전략를 구현하세요.
 
 1. 🎯 MCP를 활용하여 개발 시작하기
     - Cursor에서 KIS Code Assistant MCP를 활용하여 자동매매 시스템 개발
