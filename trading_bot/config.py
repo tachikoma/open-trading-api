@@ -1,7 +1,11 @@
 """
 자동매매 봇 설정 파일
 
-kis_devlp.yaml 파일의 정보를 사용하여 설정을 관리합니다.
+주의: KIS API 인증은 kis_auth.py에서 다음 경로의 설정 파일을 사용합니다:
+    ~/KIS/config/kis_devlp.yaml
+    
+프로젝트 루트의 kis_devlp.yaml은 예시/템플릿 파일입니다.
+실제 사용을 위해서는 ~/KIS/config/kis_devlp.yaml을 생성해야 합니다.
 """
 import os
 from pathlib import Path
@@ -11,9 +15,6 @@ class Config:
     
     # 프로젝트 루트 경로
     ROOT_DIR = Path(__file__).parent.parent
-    
-    # KIS 설정 파일 경로
-    KIS_CONFIG_PATH = ROOT_DIR / "kis_devlp.yaml"
     
     # 실전/모의 구분
     # "real": 실전 투자 (KIS API 내부적으로 prod 사용)
@@ -61,17 +62,24 @@ class Config:
     
     @classmethod
     def validate(cls):
-        """설정 유효성 검증"""
-        if not cls.KIS_CONFIG_PATH.exists():
-            raise FileNotFoundError(
-                f"KIS 설정 파일을 찾을 수 없습니다: {cls.KIS_CONFIG_PATH}\n"
-                "kis_devlp.yaml 파일을 생성해주세요."
-            )
+        """설정 유효성 검증
         
+        주의: KIS 설정 파일(kis_devlp.yaml)은 kis_auth.py에서
+              ~/KIS/config/kis_devlp.yaml 경로를 사용합니다.
+        """
         if cls.ENV_MODE not in ["real", "demo"]:
             raise ValueError("ENV_MODE는 'real' 또는 'demo'여야 합니다.")
         
         if not cls.LOG_DIR.exists():
             cls.LOG_DIR.mkdir(parents=True, exist_ok=True)
+        
+        # KIS 설정 파일 경로 안내
+        kis_config = Path.home() / "KIS" / "config" / "kis_devlp.yaml"
+        if not kis_config.exists():
+            raise FileNotFoundError(
+                f"KIS 설정 파일을 찾을 수 없습니다: {kis_config}\n"
+                f"다음 위치에 kis_devlp.yaml 파일을 생성해주세요: {kis_config.parent}/\n"
+                f"프로젝트 루트의 kis_devlp.yaml을 템플릿으로 사용할 수 있습니다."
+            )
         
         return True

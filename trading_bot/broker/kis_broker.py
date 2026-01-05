@@ -32,15 +32,17 @@ class KISBroker:
     사용하기 편한 인터페이스를 제공합니다.
     """
     
-    def __init__(self, env_mode: str = "demo", config_path: Optional[Path] = None):
+    def __init__(self, env_mode: str = "demo"):
         """
         Args:
             env_mode: 'real' (실전투자) 또는 'demo' (모의투자)
-            config_path: kis_devlp.yaml 파일 경로
+        
+        Note:
+            KIS API 인증은 kis_auth.py에서 다음 경로의 설정 파일을 사용합니다:
+            ~/KIS/config/kis_devlp.yaml
         """
         self.logger = setup_logger("KISBroker", Config.LOG_DIR, Config.LOG_LEVEL)
         self.env_mode = env_mode
-        self.config_path = config_path or Config.KIS_CONFIG_PATH
         
         # KIS 인증 초기화
         self._init_auth()
