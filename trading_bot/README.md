@@ -72,8 +72,33 @@ python run_bot.py
 
 ### 2. 설정 파일 확인
 
-`kis_devlp.yaml` 파일에 KIS API 인증 정보가 있어야 합니다.
-기본 경로: `~/KIS/config/kis_devlp.yaml`
+**⚠️ 중요: KIS API 설정 파일 위치**
+
+KIS API 인증은 다음 경로의 설정 파일을 사용합니다:
+```
+~/KIS/config/kis_devlp.yaml
+```
+
+**프로젝트 루트의 `kis_devlp.yaml`은 예시/템플릿 파일입니다.**
+
+#### 설정 파일 생성 방법
+
+```bash
+# 1. 디렉토리 생성
+mkdir -p ~/KIS/config
+
+# 2. 프로젝트 루트의 템플릿을 복사
+cp kis_devlp.yaml ~/KIS/config/
+
+# 3. 설정 파일 수정
+vi ~/KIS/config/kis_devlp.yaml
+# 또는
+code ~/KIS/config/kis_devlp.yaml
+```
+
+#### 설정 파일 내용
+
+`~/KIS/config/kis_devlp.yaml` 파일에 KIS API 인증 정보를 설정합니다:
 
 ```yaml
 # 실전투자

@@ -9,7 +9,32 @@ cd open-trading-api
 ```
 
 ### 2단계: KIS API 설정
-`~/KIS/config/kis_devlp.yaml` 파일 생성 및 설정:
+
+**⚠️ 중요: 설정 파일 위치**
+
+KIS API는 다음 경로의 설정 파일을 사용합니다:
+```
+~/KIS/config/kis_devlp.yaml
+```
+
+**프로젝트 루트의 kis_devlp.yaml은 예시 파일입니다.**
+
+#### 설정 파일 생성
+
+```bash
+# 디렉토리 생성
+mkdir -p ~/KIS/config
+
+# 프로젝트 템플릿 복사
+cp /path/to/open-trading-api/kis_devlp.yaml ~/KIS/config/
+
+# 설정 파일 수정
+vi ~/KIS/config/kis_devlp.yaml
+```
+
+#### 설정 파일 내용
+
+`~/KIS/config/kis_devlp.yaml` 파일을 다음과 같이 설정하세요:
 
 ```yaml
 # 모의투자 (테스트용)

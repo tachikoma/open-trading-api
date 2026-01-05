@@ -26,6 +26,28 @@ demo (모의투자)     →    vps 서버          →    env_dv="demo"
 
 ## ⚙️ 설정 방법
 
+### 0. KIS 설정 파일 위치 (중요!)
+
+**KIS API는 다음 경로의 설정 파일을 사용합니다:**
+```
+~/KIS/config/kis_devlp.yaml
+```
+
+**프로젝트 루트의 `kis_devlp.yaml`은 예시/템플릿 파일입니다.**
+
+실제 사용을 위해서는 반드시 `~/KIS/config/kis_devlp.yaml`을 생성해야 합니다:
+
+```bash
+# 디렉토리 생성
+mkdir -p ~/KIS/config
+
+# 템플릿 복사 (프로젝트 루트에서)
+cp kis_devlp.yaml ~/KIS/config/
+
+# 설정 파일 수정
+vi ~/KIS/config/kis_devlp.yaml
+```
+
 ### 1. config.py 설정
 ```python
 # trading_bot/config.py
