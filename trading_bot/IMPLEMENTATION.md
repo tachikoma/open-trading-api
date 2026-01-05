@@ -105,7 +105,7 @@ uv run run_bot.py
 
 ### trading_bot/config.py
 ```python
-ENV_MODE = "demo"                    # demo: 모의투자, real: 실전
+ENV_MODE = "demo"                    # "demo": 모의투자(vps), "real": 실전투자(prod)
 TRADING_ENABLED = False              # False: 로그만, True: 실제 주문
 SCHEDULE_INTERVAL_MINUTES = 5        # 5분마다 전략 실행
 
