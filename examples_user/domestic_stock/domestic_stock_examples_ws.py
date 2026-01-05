@@ -12,8 +12,8 @@ logging.basicConfig(level=logging.INFO, format='%(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 # 인증
-ka.auth()
-ka.auth_ws()
+ka.auth(svr='vps')
+ka.auth_ws(svr='vps')
 trenv = ka.getTREnv()
 
 # 웹소켓 선언
