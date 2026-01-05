@@ -35,7 +35,7 @@ class KISBroker:
     def __init__(self, env_mode: str = "demo", config_path: Optional[Path] = None):
         """
         Args:
-            env_mode: 'real' 또는 'demo'
+            env_mode: 'real' (실전투자) 또는 'demo' (모의투자)
             config_path: kis_devlp.yaml 파일 경로
         """
         self.logger = setup_logger("KISBroker", Config.LOG_DIR, Config.LOG_LEVEL)
@@ -48,9 +48,14 @@ class KISBroker:
         self.logger.info(f"KISBroker 초기화 완료 (모드: {self.env_mode})")
     
     def _init_auth(self):
-        """KIS 인증 초기화"""
+        """KIS 인증 초기화
+        
+        사용자 설정(real/demo)을 KIS API 내부 파라미터(prod/vps)로 변환
+        """
         try:
-            # env_mode에 따라 실전/모의투자 설정
+            # env_mode를 KIS API 서버 파라미터로 변환
+            # real -> prod (실전투자 서버)
+            # demo -> vps (모의투자 서버)
             svr = "prod" if self.env_mode == "real" else "vps"
             
             # KIS 인증 수행

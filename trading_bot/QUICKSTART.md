@@ -21,9 +21,9 @@ my_acct: "12345678"  # 계좌번호 8자리
 my_prod: "01"        # 상품코드 2자리
 my_htsid: "your_hts_id"
 
-# 서버 URL (그대로 사용)
-vps: "https://openapivts.koreainvestment.com:29443"
-prod: "https://openapi.koreainvestment.com:9443"
+# 서버 URL (KIS API 내부 사용, 그대로 사용)
+vps: "https://openapivts.koreainvestment.com:29443"  # 모의투자 서버
+prod: "https://openapi.koreainvestment.com:9443"     # 실전투자 서버
 my_url: "https://openapivts.koreainvestment.com:29443"
 my_url_ws: "ws://ops.koreainvestment.com:31000"
 my_agent: "Mozilla/5.0"
@@ -117,7 +117,7 @@ pkill -f run_bot.py
 ### 테스트 모드 (안전)
 ```python
 # config.py
-ENV_MODE = "demo"           # 모의투자 서버
+ENV_MODE = "demo"           # 모의투자 서버 (KIS API는 내부적으로 vps 서버 사용)
 TRADING_ENABLED = False     # 주문 비활성화 (로깅만)
 ```
 - 실제 주문 없음
@@ -127,7 +127,7 @@ TRADING_ENABLED = False     # 주문 비활성화 (로깅만)
 ### 모의투자 모드
 ```python
 # config.py
-ENV_MODE = "demo"           # 모의투자 서버
+ENV_MODE = "demo"           # 모의투자 서버 (KIS API는 내부적으로 vps 서버 사용)
 TRADING_ENABLED = True      # 주문 활성화
 ```
 - 모의투자 서버에서 주문 실행
@@ -137,7 +137,7 @@ TRADING_ENABLED = True      # 주문 활성화
 ### 실전투자 모드 (주의!)
 ```python
 # config.py
-ENV_MODE = "real"           # 실전투자 서버
+ENV_MODE = "real"           # 실전투자 서버 (KIS API는 내부적으로 prod 서버 사용)
 TRADING_ENABLED = True      # 주문 활성화
 ```
 - **실제 계좌로 주문 실행**
@@ -215,7 +215,8 @@ chmod 755 trading_bot/logs
 
 ## 💡 팁
 
-- VPS 사용 권장 (24시간 안정적 실행)
+- 24시간 운영 시 개인 VPS(가상 서버) 또는 클라우드 서버 사용 권장
+  - 참고: KIS API의 'vps'는 모의투자 서버를 의미하며, 개인 서버 VPS와는 다릅니다
 - 로그 디스크 용량 정기 체크
 - 전략 파라미터는 백테스팅 후 조정
 - 손절/익절 로직 반드시 구현

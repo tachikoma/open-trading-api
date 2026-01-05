@@ -86,12 +86,12 @@ paper_sec: "모의투자_시크릿"
 
 # 계좌 정보
 my_acct: "계좌번호8자리"
-my_prod: "상품코드2자리"
+my_prod: "상품코드２자리"  # 01: 주식, 03: 선물옵션 등
 my_htsid: "HTS_ID"
 
-# 서버 URL
-prod: "https://openapi.koreainvestment.com:9443"
-vps: "https://openapivts.koreainvestment.com:29443"
+# 서버 URL (KIS API 내부 사용, 수정 불필요)
+prod: "https://openapi.koreainvestment.com:9443"      # 실전투자 서버
+vps: "https://openapivts.koreainvestment.com:29443"  # 모의투자 서버
 my_url: "https://openapivts.koreainvestment.com:29443"
 my_url_ws: "ws://ops.koreainvestment.com:31000"
 my_agent: "Mozilla/5.0"
@@ -102,7 +102,9 @@ my_agent: "Mozilla/5.0"
 [trading_bot/config.py](trading_bot/config.py) 파일에서 설정을 변경할 수 있습니다:
 
 ```python
-# 환경 모드 ("demo" 또는 "real")
+# 환경 모드 (사용자 설정)
+# "demo": 모의투자 (KIS API는 내부적으로 vps 서버 사용)
+# "real": 실전투자 (KIS API는 내부적으로 prod 서버 사용)
 ENV_MODE = "demo"
 
 # 실제 거래 활성화 (False면 시뮬레이션만)
@@ -264,7 +266,8 @@ strategies = [
 
 4. **네트워크**: 
    - 안정적인 인터넷 연결이 필요합니다
-   - VPS 사용을 권장합니다
+   - 24시간 운영 시 개인 VPS 또는 클라우드 서버 사용을 권장합니다
+   - (참고: KIS API의 vps는 모의투자 서버를 의미하며, 개인 서버 VPS와는 다릅니다)
 
 5. **장 운영 시간**: 
    - 평일 09:00~15:30에만 거래됩니다

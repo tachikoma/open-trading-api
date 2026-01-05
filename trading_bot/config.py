@@ -15,7 +15,10 @@ class Config:
     # KIS 설정 파일 경로
     KIS_CONFIG_PATH = ROOT_DIR / "kis_devlp.yaml"
     
-    # 실전/모의 구분 (개발 단계에서는 'demo' 사용 권장)
+    # 실전/모의 구분
+    # "real": 실전 투자 (KIS API 내부적으로 prod 사용)
+    # "demo": 모의 투자 (KIS API 내부적으로 vps 사용)
+    # 개발 단계에서는 'demo' 사용 권장
     ENV_MODE = "demo"  # "real" or "demo"
     
     # 매매 설정
