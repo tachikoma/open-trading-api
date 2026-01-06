@@ -192,15 +192,16 @@ class BacktestReport:
                 # holdings_count가 없으면 0으로 채움
                 equity_df.loc[:, 'holdings_count'] = 0
             
-            # Figure 생성 (3개 서브플롯)
-            fig, axes = plt.subplots(3, 1, figsize=(14, 10), sharex=True)
+            # Figure 생성 (3개 서브플롯, 비율 조정)
+            fig, axes = plt.subplots(3, 1, figsize=(14, 11), sharex=True,
+                                    gridspec_kw={'height_ratios': [2, 1, 1.5]})
             fig.patch.set_facecolor('white')
             
             # 제목에 주요 통계 포함
             title = f"백테스트 결과\n"
             title += f"총 수익률: {metrics['total_return_pct']:.2f}% | "
             title += f"연환산 수익률: {metrics['cagr_pct']:.2f}%"
-            fig.suptitle(title, fontsize=16, fontweight='bold', y=0.995)
+            fig.suptitle(title, fontsize=14, fontweight='bold', y=0.98)
             
             # 1. 포트폴리오 가치 (상단)
             ax1 = axes[0]
@@ -209,16 +210,16 @@ class BacktestReport:
             ax1.axhline(y=metrics['initial_capital'], 
                        color='r', linestyle='--', label='초기 자본', alpha=0.5, linewidth=1)
             
-            ax1.set_ylabel('자산 (원)', fontsize=11)
-            ax1.legend(loc='upper left', fontsize=9)
-            ax1.grid(True, alpha=0.3, linestyle=':')
+            ax1.set_ylabel('자산 (원)', fontsize=10, fontweight='bold')
+            ax1.legend(loc='upper left', fontsize=8, framealpha=0.9)
+            ax1.grid(True, alpha=0.2, linestyle=':', linewidth=0.5)
             ax1.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{int(x/1e6):.1f}M' if x >= 1e6 else f'{int(x/1e3):.0f}K'))
             
-            # 통계 정보 표시
+            # 통계 정보 표시 (위치 조정)
             stats_text = f"최종 자본: {metrics['final_capital']:,.0f}원"
-            ax1.text(0.02, 0.95, stats_text, transform=ax1.transAxes,
-                    fontsize=9, verticalalignment='top',
-                    bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.3))
+            ax1.text(0.98, 0.97, stats_text, transform=ax1.transAxes,
+                    fontsize=8, verticalalignment='top', horizontalalignment='right',
+                    bbox=dict(boxstyle='round,pad=0.5', facecolor='wheat', alpha=0.5, edgecolor='gray'))
             
             # 2. 보유 종목 수 (중단)
             ax2 = axes[1]
@@ -227,16 +228,16 @@ class BacktestReport:
             ax2.fill_between(equity_df['date'], 0, equity_df['holdings_count'], 
                             alpha=0.3, color='#2ca02c', step='post')
             
-            ax2.set_ylabel('보유 종목 수', fontsize=11)
-            ax2.legend(loc='upper left', fontsize=9)
-            ax2.grid(True, alpha=0.3, linestyle=':')
+            ax2.set_ylabel('보유 종목 수', fontsize=10, fontweight='bold')
+            ax2.legend(loc='upper left', fontsize=8, framealpha=0.9)
+            ax2.grid(True, alpha=0.2, linestyle=':', linewidth=0.5)
             ax2.set_ylim(bottom=0)
             
-            # 거래 횟수 정보
+            # 거래 횟수 정보 (하단 배치, 배경색 변경)
             trades_text = f"총 거래: {metrics['total_trades']}회 | 승률: {metrics['win_rate_pct']:.1f}%"
-            ax2.text(0.02, 0.95, trades_text, transform=ax2.transAxes,
-                    fontsize=9, verticalalignment='top',
-                    bbox=dict(boxstyle='round', facecolor='lightgreen', alpha=0.3))
+            ax2.text(0.98, 0.03, trades_text, transform=ax2.transAxes,
+                    fontsize=8, verticalalignment='bottom', horizontalalignment='right',
+                    bbox=dict(boxstyle='round,pad=0.5', facecolor='lightyellow', alpha=0.7, edgecolor='gray'))
             
             # 3. 누적 수익률 (하단)
             ax3 = axes[2]
@@ -254,25 +255,26 @@ class BacktestReport:
                     linewidth=2, color='purple', label='누적 수익률')
             ax3.axhline(y=0, color='black', linestyle='-', linewidth=0.5, alpha=0.3)
             
-            ax3.set_xlabel('날짜', fontsize=11)
-            ax3.set_ylabel('누적 수익률 (%)', fontsize=11)
-            ax3.legend(loc='upper left', fontsize=9)
-            ax3.grid(True, alpha=0.3, linestyle=':')
+            ax3.set_xlabel('날짜', fontsize=10, fontweight='bold')
+            ax3.set_ylabel('누적 수익률 (%)', fontsize=10, fontweight='bold')
+            ax3.legend(loc='upper left', fontsize=8, framealpha=0.9)
+            ax3.grid(True, alpha=0.2, linestyle=':', linewidth=0.5)
             
-            # MDD 정보
+            # MDD 정보 (위치 조정)
             mdd_text = f"MDD: {metrics['mdd_pct']:.2f}% | 샤프 비율: {metrics['sharpe_ratio']:.2f}"
-            ax3.text(0.02, 0.05, mdd_text, transform=ax3.transAxes,
-                    fontsize=9, verticalalignment='bottom',
-                    bbox=dict(boxstyle='round', facecolor='lightcoral', alpha=0.3))
+            ax3.text(0.98, 0.03, mdd_text, transform=ax3.transAxes,
+                    fontsize=8, verticalalignment='bottom', horizontalalignment='right',
+                    bbox=dict(boxstyle='round,pad=0.5', facecolor='lightcoral', alpha=0.5, edgecolor='gray'))
             
             # 날짜 포맷 설정 (x축 공통)
             ax3.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
-            fig.autofmt_xdate()
+            fig.autofmt_xdate(rotation=45)
             
-            plt.tight_layout()
+            # 서브플롯 간격 조정
+            plt.subplots_adjust(left=0.08, right=0.95, top=0.94, bottom=0.08, hspace=0.15)
             
             if save_path:
-                plt.savefig(save_path, dpi=300, bbox_inches='tight')
+                plt.savefig(save_path, dpi=300, bbox_inches='tight', facecolor='white')
                 print(f"✅ 그래프 저장: {save_path}")
             else:
                 plt.show()
