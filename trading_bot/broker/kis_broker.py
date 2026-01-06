@@ -60,7 +60,7 @@ class KISBroker:
             # demo -> vps (모의투자 서버)
             svr = "prod" if self.env_mode == "real" else "vps"
             
-            # KIS 인증 수행
+            # KIS 인증 수행 (토큰 자동 재발급)
             ka.auth(svr=svr)
             
             # 환경 정보 가져오기
@@ -98,7 +98,7 @@ class KISBroker:
     
     def get_daily_price(self, symbol: str, period: str = "D") -> Optional[pd.DataFrame]:
         """
-        일별 시세 조회
+        일별 시세 조회 (최근 30일 제한)
         
         Args:
             symbol: 종목코드
@@ -118,6 +118,34 @@ class KISBroker:
             return df
         except Exception as e:
             self.logger.error(f"일별 시세 조회 실패 ({symbol}): {e}")
+            return None
+    
+    def get_period_price(self, symbol: str, start_date: str, end_date: str, period: str = "D") -> Optional[pd.DataFrame]:
+        """
+        기간별 시세 조회 (최대 100건)
+        
+        Args:
+            symbol: 종목코드
+            start_date: 조회 시작일 (YYYYMMDD)
+            end_date: 조회 종료일 (YYYYMMDD)
+            period: 기간 구분 (D:일봉, W:주봉, M:월봉, Y:년봉)
+        
+        Returns:
+            기간별 시세 DataFrame (output2)
+        """
+        try:
+            output1, output2 = dsf.inquire_daily_itemchartprice(
+                env_dv=self.env_mode,
+                fid_cond_mrkt_div_code="J",
+                fid_input_iscd=symbol,
+                fid_input_date_1=start_date,
+                fid_input_date_2=end_date,
+                fid_period_div_code=period,
+                fid_org_adj_prc="0"  # 0:수정주가, 1:원주가
+            )
+            return output2  # output2에 일별 시세 데이터가 있음
+        except Exception as e:
+            self.logger.error(f"기간별 시세 조회 실패 ({symbol}): {e}")
             return None
     
     def get_asking_price(self, symbol: str) -> Optional[Tuple[pd.DataFrame, pd.DataFrame]]:

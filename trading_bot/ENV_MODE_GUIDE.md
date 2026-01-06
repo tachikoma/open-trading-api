@@ -157,7 +157,11 @@ ENV_MODE = "demo"   # ✅ 모의투자
 
 ### 로그에서 확인
 ```bash
-# 실행 후 로그 확인
+# trading_bot 폴더에서
+cd trading_bot
+tail -f logs/Main_*.log
+
+# 또는 프로젝트 루트에서
 tail -f trading_bot/logs/Main_*.log
 ```
 

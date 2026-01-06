@@ -39,6 +39,24 @@ class BaseStrategy(ABC):
         """
         pass
     
+    def analyze_data(self, symbol: str, data):
+        """
+        과거 데이터 분석 (백테스트용)
+        
+        Args:
+            symbol: 종목코드
+            data: 과거 데이터 (DataFrame 또는 기타 형식)
+            
+        Returns:
+            {'action': 'buy'|'sell'|'hold', 'reason': str} 또는 None
+        """
+        # 기본 구현: get_signal 메서드 사용 (있으면)
+        if hasattr(self, 'get_signal'):
+            signal = self.get_signal(symbol)
+            if signal:
+                return {'action': signal.lower(), 'reason': 'strategy signal'}
+        return None
+    
     def log_signal(self, symbol: str, signal: str, reason: str):
         """
         시그널 로깅

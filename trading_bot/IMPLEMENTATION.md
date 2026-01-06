@@ -44,33 +44,33 @@
 
 ```
 open-trading-api/
-├── run_bot.py                          # 👈 메인 실행 파일
-├── kis_devlp.yaml                      # KIS API 설정 (~/KIS/config/)
 ├── pyproject.toml
 ├── requirements.txt
-├── examples_user/                       # KIS 원본 코드 (유지)
+├── kis_devlp.yaml                      # KIS API 설정 템플릿
+├── examples_user/                      # KIS 원본 코드 (유지)
 │   ├── kis_auth.py
 │   └── domestic_stock/
 │       ├── domestic_stock_functions.py
 │       └── domestic_stock_functions_ws.py
-└── trading_bot/                         # 👈 새로 만든 자동매매 봇
+└── trading_bot/                        # 👈 자동매매 봇
     ├── __init__.py
-    ├── main.py                          # 봇 메인 로직
-    ├── config.py                        # 설정 파일
-    ├── scheduler.py                     # 스케줄러
-    ├── README.md                        # 상세 문서
-    ├── QUICKSTART.md                    # 빠른 시작
+    ├── run_bot.py                      # 👈 실행 스크립트
+    ├── main.py                         # 봇 메인 로직
+    ├── config.py                       # 설정 파일
+    ├── scheduler.py                    # 스케줄러
+    ├── README.md                       # 상세 문서
+    ├── QUICKSTART.md                   # 빠른 시작
     ├── broker/
     │   ├── __init__.py
-    │   └── kis_broker.py               # KIS API 래퍼
+    │   └── kis_broker.py              # KIS API 래퍼
     ├── strategies/
     │   ├── __init__.py
-    │   ├── base_strategy.py            # 전략 베이스 클래스
-    │   └── ma_crossover.py             # 이동평균 교차 전략
+    │   ├── base_strategy.py           # 전략 베이스 클래스
+    │   └── ma_crossover.py            # 이동평균 교차 전략
     ├── utils/
     │   ├── __init__.py
-    │   └── logger.py                   # 로깅 유틸
-    └── logs/                           # 로그 파일들
+    │   └── logger.py                  # 로깅 유틸
+    └── logs/                          # 로그 파일들
         ├── Main_20260105.log
         ├── KISBroker_20260105.log
         ├── Scheduler_20260105.log
@@ -81,11 +81,13 @@ open-trading-api/
 
 ### 기본 실행 (uv 필수)
 ```bash
-# 프로젝트 루트에서
-cd /path/to/open-trading-api
-
-# uv로 실행 (의존성 자동 관리)
+# 방법 1: trading_bot 폴더에서 실행 (권장)
+cd /path/to/open-trading-api/trading_bot
 uv run run_bot.py
+
+# 방법 2: 프로젝트 루트에서 실행
+cd /path/to/open-trading-api
+uv run trading_bot/run_bot.py
 ```
 
 > **⚠️ 중요**: 이 프로젝트는 `uv` 기반입니다.
@@ -199,9 +201,29 @@ TRADING_ENABLED = True
 
 ## 🔧 문제 해결
 
+### python run_bot.py 실행 시 오류
+**문제**: `ModuleNotFoundError: No module named 'pandas'`
+**해결**: `uv run`을 사용하세요
+```bash
+# ❌ 이렇게 하면 오류
+python run_bot.py
+
+# ✅ 올바른 방법
+cd trading_bot
+uv run run_bot.py
+```
+
 ### ImportError 발생
 **문제**: `ImportError: attempted relative import beyond top-level package`
-**해결**: 프로젝트 루트에서 `run_bot.py` 실행 (trading_bot/ 안에서 실행 X)
+**해결**: trading_bot 폴더 또는 프로젝트 루트에서 실행
+```bash
+# 방법 1: trading_bot 폴더에서
+cd trading_bot
+uv run run_bot.py
+
+# 방법 2: 프로젝트 루트에서
+uv run trading_bot/run_bot.py
+```
 
 ### KIS 인증 실패
 **문제**: `AttributeError: module 'kis_auth' has no attribute 'trenv'`

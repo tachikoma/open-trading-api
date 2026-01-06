@@ -60,6 +60,12 @@ class Config:
     STOP_LOSS_PERCENT = 3.0    # 손절 비율 (3%)
     TAKE_PROFIT_PERCENT = 5.0   # 익절 비율 (5%)
     
+    # 백테스트 설정
+    BACKTEST_INITIAL_CAPITAL = 10000000  # 백테스트 초기 자본금 (1천만원)
+    BACKTEST_COMMISSION_RATE = 0.00015   # 수수료율 0.015% (편도)
+    BACKTEST_SLIPPAGE_RATE = 0.001       # 슬리피지 0.1%
+    BACKTEST_RESULTS_DIR = Path(__file__).parent / "backtest_results"
+    
     @classmethod
     def validate(cls):
         """설정 유효성 검증
