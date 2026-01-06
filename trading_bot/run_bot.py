@@ -19,7 +19,7 @@ import sys
 from pathlib import Path
 
 # 프로젝트 루트를 sys.path에 추가
-PROJECT_ROOT = Path(__file__).parent
+PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 # trading_bot.main 실행

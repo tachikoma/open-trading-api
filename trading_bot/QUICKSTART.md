@@ -75,19 +75,22 @@ TRADING_ENABLED = False
 
 ### 4단계: 실행!
 ```bash
-# 프로젝트 루트에서
-cd /path/to/open-trading-api
-
-# uv로 실행 (권장 - 의존성 자동 관리)
+# 방법 1: trading_bot 폴더에서 실행 (권장)
+cd /path/to/open-trading-api/trading_bot
 uv run run_bot.py
-```
 
-> **⚠️ 주의**: `python run_bot.py`는 의존성 오류가 발생할 수 있습니다.
-> 이 프로젝트는 `uv` 기반이므로 `uv run`을 사용하세요.
+# 방법 2: 프로젝트 루트에서 실행
+cd /path/to/open-trading-api
+uv run trading_bot/run_bot.py
+```
 
 ### 5단계: 로그 확인
 ```bash
-# 실시간 로그 모니터링
+# trading_bot 폴더에서
+cd trading_bot
+tail -f logs/Main_$(date +%Y%m%d).log
+
+# 또는 프로젝트 루트에서
 tail -f trading_bot/logs/Main_$(date +%Y%m%d).log
 ```
 
@@ -95,35 +98,41 @@ tail -f trading_bot/logs/Main_$(date +%Y%m%d).log
 
 ### 실행
 ```bash
-# 기본 실행 (항상 프로젝트 루트에서)
-cd /path/to/open-trading-api
+# 방법 1: trading_bot 폴더에서 (권장)
+cd /path/to/open-trading-api/trading_bot
 uv run run_bot.py
 
+# 방법 2: 프로젝트 루트에서
+cd /path/to/open-trading-api
+uv run trading_bot/run_bot.py
+
 # 백그라운드 실행 (nohup)
+cd /path/to/open-trading-api/trading_bot
 nohup uv run run_bot.py > bot.log 2>&1 &
 
 # 백그라운드 실행 (screen)
 screen -S trading_bot
-cd /path/to/open-trading-api
+cd /path/to/open-trading-api/trading_bot
 uv run run_bot.py
 # Ctrl+A, D로 detach
 ```
 
-> **💡 Tip**: 항상 프로젝트 루트(`open-trading-api/`)에서 실행하세요.
-
 ### 로그 확인
 ```bash
+# trading_bot 폴더에서
+cd trading_bot
+
 # 전체 로그
-tail -f trading_bot/logs/*.log
+tail -f logs/*.log
 
 # 메인 로그만
-tail -f trading_bot/logs/Main_*.log
+tail -f logs/Main_*.log
 
 # 전략 시그널만
-tail -f trading_bot/logs/Strategy*.log
+tail -f logs/Strategy*.log
 
 # 최근 100줄
-tail -100 trading_bot/logs/Main_*.log
+tail -100 logs/Main_*.log
 ```
 
 ### 프로세스 관리
@@ -180,6 +189,7 @@ TRADING_ENABLED = True      # 주문 활성화
 python run_bot.py
 
 # ✅ 올바른 실행 방법
+cd trading_bot
 uv run run_bot.py
 ```
 

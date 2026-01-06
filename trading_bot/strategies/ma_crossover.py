@@ -38,6 +38,60 @@ class MovingAverageCrossover(BaseStrategy):
         
         self.logger.info(f"이동평균 설정: 단기={self.short_period}일, 장기={self.long_period}일")
     
+    def analyze_data(self, symbol: str, data):
+        """
+        과거 데이터 분석 (백테스트용)
+        
+        Args:
+            symbol: 종목코드
+            data: 과거 데이터 DataFrame
+            
+        Returns:
+            {'action': 'buy'|'sell'|'hold', 'reason': str} 또는 None
+        """
+        import pandas as pd
+        
+        if data is None or len(data) < self.long_period:
+            return None
+        
+        # 가격 데이터 추출
+        if 'stck_clpr' in data.columns:
+            prices = data['stck_clpr'].astype(float)
+        elif 'close' in data.columns:
+            prices = data['close'].astype(float)
+        else:
+            return None
+        
+        # 이동평균 계산
+        short_ma = prices.rolling(window=self.short_period).mean()
+        long_ma = prices.rolling(window=self.long_period).mean()
+        
+        # 현재 값
+        current_short = short_ma.iloc[-1]
+        current_long = long_ma.iloc[-1]
+        
+        # 이전 값 (교차 감지용)
+        if len(short_ma) < 2:
+            return None
+        prev_short = short_ma.iloc[-2]
+        prev_long = long_ma.iloc[-2]
+        
+        # 골든크로스 감지
+        if prev_short <= prev_long and current_short > current_long:
+            return {
+                'action': 'buy',
+                'reason': f'골든크로스 (단기MA: {current_short:.0f}, 장기MA: {current_long:.0f})'
+            }
+        
+        # 데드크로스 감지
+        elif prev_short >= prev_long and current_short < current_long:
+            return {
+                'action': 'sell',
+                'reason': f'데드크로스 (단기MA: {current_short:.0f}, 장기MA: {current_long:.0f})'
+            }
+        
+        return None
+    
     def calculate_ma(self, symbol: str) -> Optional[tuple]:
         """
         이동평균 계산

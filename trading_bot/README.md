@@ -6,7 +6,11 @@
 
 ```
 trading_bot/
-├── main.py                    # 메인 실행 파일 (또는 프로젝트 루트의 run_bot.py 사용)
+├── run_bot.py                 # 봇 실행 스크립트
+├── run_backtest.py            # 통합 백테스트 실행 스크립트
+├── create_external_db.py      # 외부 DB 생성 도구
+├── backtest_results/          # 백테스트 결과 저장 (차트, CSV)
+├── main.py                    # 메인 로직
 ├── config.py                  # 설정 파일
 ├── scheduler.py               # 스케줄러
 ├── broker/                    # KIS API 래퍼
@@ -16,6 +20,14 @@ trading_bot/
 │   ├── __init__.py
 │   ├── base_strategy.py      # 전략 베이스 클래스
 │   └── ma_crossover.py       # 이동평균 교차 전략
+├── backtest/                  # 백테스트 엔진
+│   ├── engine.py             # 백테스트 엔진
+│   ├── metrics.py            # 성과 지표 계산
+│   ├── report.py             # 리포트 생성
+│   ├── data_source.py        # 데이터 소스 관리
+│   ├── QUICKSTART.md         # 백테스트 빠른 시작
+│   ├── DATA_SOURCES.md       # 데이터 소스 가이드
+│   └── DB_GUIDE.md           # 외부 DB 생성 가이드
 ├── utils/                     # 유틸리티
 │   ├── __init__.py
 │   └── logger.py             # 로깅 유틸
@@ -39,7 +51,12 @@ trading_bot/
   - 골든크로스: 단기이평 > 장기이평 → 매수
   - 데드크로스: 단기이평 < 장기이평 → 매도
 
-### 3. 스케줄러
+### 3. 백테스트 시스템
+- **3가지 데이터 소스**: KIS API (100일), 외부 DB (무제한), FinanceDataReader (무제한)
+- **통합 실행 스크립트**: `run_backtest.py --source {api|db|fdr}`
+- **상세 가이드**: [backtest/QUICKSTART.md](backtest/QUICKSTART.md)
+
+### 4. 스케줄러
 - 정해진 시간 간격으로 전략 실행
 - 장 운영 시간 체크 (평일 09:00~15:30)
 - 두 가지 방식 지원:
@@ -54,9 +71,16 @@ trading_bot/
 
 #### uv 사용 (권장)
 ```bash
-# 프로젝트 루트에서 자동으로 의존성 설치 및 실행
+# 방법 1: 프로젝트 루트에서 실행
 cd /path/to/open-trading-api
+uv run trading_bot/run_bot.py
+
+# 방법 2: trading_bot 폴더에서 실행 (권장)
+cd /path/to/open-trading-api/trading_bot
 uv run run_bot.py
+
+# 백테스트 실행
+uv run run_backtest.py --source fdr --start 20220101
 ```
 
 #### pip 사용
@@ -64,10 +88,14 @@ uv run run_bot.py
 # 의존성 설치
 pip install -r requirements.txt
 # 또는
-pip install pandas pyyaml requests pycryptodome websockets
+pip install pandas pyyaml requests pycryptodome websockets finance-datareader
 
-# 실행
+# trading_bot 폴더에서 실행
+cd /path/to/open-trading-api/trading_bot
 python run_bot.py
+
+# 백테스트 실행
+python run_backtest.py --source fdr --start 20220101
 ```
 
 ### 2. 설정 파일 확인

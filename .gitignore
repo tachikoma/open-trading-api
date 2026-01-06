@@ -165,3 +165,9 @@ cython_debug/
 *.lock
 
 *_logs/
+# 백테스트 결과 (차트, CSV 등)
+trading_bot/backtest_results/
+
+# 백테스트 DB (외부 생성)
+trading_bot/backtest_data.db
+.DS_Store
