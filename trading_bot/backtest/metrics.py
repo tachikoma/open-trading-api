@@ -65,14 +65,14 @@ class PerformanceMetrics:
             equity_curve: 자산 가치 시계열
             
         Returns:
-            MDD (%)
+            MDD (%) - 음수로 반환 (예: -15.3%)
         """
         if len(equity_curve) == 0:
             return 0.0
         
         cumulative_max = equity_curve.cummax()
         drawdown = (equity_curve - cumulative_max) / cumulative_max * 100
-        return abs(drawdown.min())
+        return drawdown.min()  # 음수로 반환 (abs 제거)
     
     @staticmethod
     def calculate_sharpe_ratio(returns: pd.Series, risk_free_rate: float = 0.02) -> float:
