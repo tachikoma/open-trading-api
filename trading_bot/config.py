@@ -20,7 +20,7 @@ class Config:
     # "real": 실전 투자 (KIS API 내부적으로 prod 사용)
     # "demo": 모의 투자 (KIS API 내부적으로 vps 사용)
     # 개발 단계에서는 'demo' 사용 권장
-    ENV_MODE = "demo"  # "real" or "demo"
+    ENV_MODE = "real"  # "real" or "demo"
     
     # 매매 설정
     # 테스트 완료 전까지는 False로 유지하세요!

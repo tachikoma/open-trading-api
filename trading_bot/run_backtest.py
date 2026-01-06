@@ -28,6 +28,7 @@ from datetime import datetime, timedelta
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+from trading_bot.config import Config
 from trading_bot.backtest.engine import BacktestEngine
 from trading_bot.backtest.report import BacktestReport
 from trading_bot.broker.kis_broker import KISBroker

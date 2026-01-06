@@ -59,7 +59,56 @@ ENV_MODE = "demo"
 # ENV_MODE = "real"
 ```
 
-### 2. kis_devlp.yaml 설정
+### 2. 기존 토큰 파일 삭제 (중요!)
+
+**⚠️ ENV_MODE를 변경할 때는 반드시 기존 토큰 파일을 삭제해야 합니다.**
+
+#### 문제점:
+KIS API는 토큰을 날짜별로 저장하지만, **서버 구분(prod/vps)이 파일명에 포함되지 않습니다**.
+
+```bash
+# 토큰 파일 위치 및 이름
+~/KIS/config/KIS20260106  # 날짜만 포함, 서버 구분 없음!
+```
+
+**발생 가능한 문제:**
+1. `demo` 모드로 봇 실행 → 모의투자(vps) 토큰 저장
+2. `ENV_MODE = "real"`로 변경
+3. 봇 재시작 → **같은 파일에서 모의투자 토큰 읽음**
+4. 실전투자(prod) 서버에 모의투자 토큰 사용 → **인증 실패**
+
+#### 해결 방법:
+
+**ENV_MODE 변경 시 반드시 토큰 파일을 삭제하세요:**
+
+```bash
+# 오늘 날짜의 토큰 파일 삭제
+rm ~/KIS/config/KIS$(date +%Y%m%d)
+
+# 예: 2026년 1월 6일
+rm ~/KIS/config/KIS20260106
+
+# 또는 모든 토큰 파일 삭제 (안전)
+rm ~/KIS/config/KIS*
+```
+
+**완전한 전환 절차:**
+```bash
+# 1. 기존 토큰 파일 삭제
+rm ~/KIS/config/KIS$(date +%Y%m%d)
+
+# 2. config.py 수정
+# ENV_MODE = "real"  # 또는 "demo"
+
+# 3. 봇 재시작
+cd trading_bot
+uv run run_bot.py
+
+# 4. 새 토큰 자동 발급 확인
+# 로그에서 "계좌 정보 로드 완료" 메시지 확인
+```
+
+### 3. kis_devlp.yaml 설정
 ```yaml
 # ~/KIS/config/kis_devlp.yaml
 
