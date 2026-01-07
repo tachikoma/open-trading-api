@@ -128,7 +128,7 @@ class MovingAverageCrossover(BaseStrategy):
             symbol: 종목코드
         
         Returns:
-            (단기이평, 장기이평, 현재가) 또는 None
+            (단기이평, 장기이평, 현재가, 이전_단기이평, 이전_장기이평) 또는 None
         """
         try:
             # 일별 시세 조회 (장기 이평 계산을 위해 넉넉하게)
@@ -150,18 +150,25 @@ class MovingAverageCrossover(BaseStrategy):
             df['ma_short'] = df['close'].rolling(window=self.short_period).mean()
             df['ma_long'] = df['close'].rolling(window=self.long_period).mean()
             
-            # 최신 데이터
-            latest = df.iloc[0]  # domestic_stock_functions는 최신날짜가 첫 행
+            # 최신 데이터 (domestic_stock_functions는 최신날짜가 첫 행)
+            if len(df) < 2:
+                self.logger.warning(f"[{symbol}] 이전 데이터 부족 (교차 감지 불가)")
+                return None
+                
+            latest = df.iloc[0]
+            prev = df.iloc[1]  # 이전 데이터
             
             ma_short = latest['ma_short']
             ma_long = latest['ma_long']
             current_price = latest['close']
+            prev_ma_short = prev['ma_short']
+            prev_ma_long = prev['ma_long']
             
-            if pd.isna(ma_short) or pd.isna(ma_long):
+            if pd.isna(ma_short) or pd.isna(ma_long) or pd.isna(prev_ma_short) or pd.isna(prev_ma_long):
                 self.logger.warning(f"[{symbol}] 이동평균 계산 불가 (데이터 부족)")
                 return None
             
-            return ma_short, ma_long, current_price
+            return ma_short, ma_long, current_price, prev_ma_short, prev_ma_long
             
         except Exception as e:
             self.logger.error(f"[{symbol}] 이동평균 계산 중 오류: {e}")
@@ -169,7 +176,7 @@ class MovingAverageCrossover(BaseStrategy):
     
     def get_signal(self, symbol: str) -> Optional[str]:
         """
-        매매 시그널 판단
+        매매 시그널 판단 (백테스트 로직과 동일한 교차 감지)
         
         Args:
             symbol: 종목코드
@@ -181,32 +188,34 @@ class MovingAverageCrossover(BaseStrategy):
         if result is None:
             return None
         
-        ma_short, ma_long, current_price = result
-        
-        # 현재 크로스 상태
-        is_golden = ma_short > ma_long  # 골든크로스 (매수)
-        is_dead = ma_short < ma_long    # 데드크로스 (매도)
-        
-        # 이전 상태와 비교
-        prev_state = self.prev_signals.get(symbol, None)
+        ma_short, ma_long, current_price, prev_ma_short, prev_ma_long = result
         
         signal = None
         reason = ""
         
-        if is_golden and prev_state != 'golden':
-            # 골든크로스 발생
+        # 골든크로스 감지 (이전: 단기 <= 장기, 현재: 단기 > 장기)
+        # ※ 백테스트 analyze_data()와 동일한 로직
+        if prev_ma_short <= prev_ma_long and ma_short > ma_long:
             signal = 'BUY'
-            reason = f"골든크로스 (단기={ma_short:.0f}, 장기={ma_long:.0f})"
+            reason = f"골든크로스 (단기MA: {ma_short:.0f}, 장기MA: {ma_long:.0f})"
             self.prev_signals[symbol] = 'golden'
             
-        elif is_dead and prev_state != 'dead':
-            # 데드크로스 발생
+        # 데드크로스 감지 (이전: 단기 >= 장기, 현재: 단기 < 장기)
+        # ※ 백테스트 analyze_data()와 동일한 로직
+        elif prev_ma_short >= prev_ma_long and ma_short < ma_long:
             signal = 'SELL'
-            reason = f"데드크로스 (단기={ma_short:.0f}, 장기={ma_long:.0f})"
+            reason = f"데드크로스 (단기MA: {ma_short:.0f}, 장기MA: {ma_long:.0f})"
             self.prev_signals[symbol] = 'dead'
         else:
+            # 시그널 없음 (교차하지 않음)
             signal = 'HOLD'
-            reason = f"유지 (단기={ma_short:.0f}, 장기={ma_long:.0f}, 현재가={current_price:.0f})"
+            status = "상승세" if ma_short > ma_long else "하락세"
+            reason = f"{status} 유지 (단기={ma_short:.0f}, 장기={ma_long:.0f})"
+            # 현재 상태 저장 (다음 체크를 위해)
+            if ma_short > ma_long:
+                self.prev_signals[symbol] = 'golden'
+            else:
+                self.prev_signals[symbol] = 'dead'
         
         self.log_signal(symbol, signal, reason)
         return signal
