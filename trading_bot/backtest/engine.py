@@ -187,23 +187,32 @@ class BacktestEngine:
             end_date: str,
             broker: Optional[KISBroker] = None,
             db_path: Optional[Path] = None,
-            use_fdr: bool = False) -> Dict:
+            use_fdr: bool = False,
+            data_start_date: Optional[str] = None) -> dict:
         """
         백테스트 실행
         
         Args:
             strategy: 전략 객체
             symbols: 종목코드 리스트
-            start_date: 시작일 (YYYYMMDD)
+            start_date: 백테스트 시작일 (YYYYMMDD) - 실제 거래 시작일
             end_date: 종료일 (YYYYMMDD)
             broker: KISBroker 인스턴스 (없으면 새로 생성)
             db_path: SQLite DB 파일 경로 (있으면 DB 사용)
             use_fdr: FinanceDataReader 사용 여부 (True면 FDR 사용)
+            data_start_date: 데이터 로드 시작일 (YYYYMMDD, 워밍업 기간 포함)
+                           - 없으면 start_date 사용
+                           - 이동평균 등 지표 계산을 위해 start_date보다 이전부터 데이터 로드
             
         Returns:
             백테스트 결과 딕셔너리
         """
-        self.logger.info(f"백테스트 시작: {start_date} ~ {end_date}")
+        # 워밍업 기간 포함된 데이터 로드 시작일 사용
+        actual_data_start = data_start_date if data_start_date else start_date
+        
+        self.logger.info(f"백테스트 기간: {start_date} ~ {end_date}")
+        if data_start_date:
+            self.logger.info(f"데이터 로드 기간: {data_start_date} ~ {end_date} (워밍업 포함)")
         self.logger.info(f"초기 자본금: {self.initial_capital:,.0f}원")
         self.logger.info(f"대상 종목: {', '.join(symbols)}")
         
@@ -214,13 +223,13 @@ class BacktestEngine:
             # FinanceDataReader에서 데이터 로드
             self.logger.info("FinanceDataReader에서 데이터 로드")
             historical_data = BacktestDataSource.load_from_fdr(
-                symbols, start_date, end_date
+                symbols, actual_data_start, end_date
             )
         elif db_path and Path(db_path).exists():
             # SQLite DB에서 데이터 로드
             self.logger.info(f"DB 파일에서 데이터 로드: {db_path}")
             historical_data = BacktestDataSource.load_from_sqlite(
-                Path(db_path), symbols, start_date, end_date
+                Path(db_path), symbols, actual_data_start, end_date
             )
         else:
             # KIS API에서 데이터 로드 (최대 100건)
@@ -229,7 +238,7 @@ class BacktestEngine:
                 broker = KISBroker(env_mode="demo")
             
             historical_data = BacktestDataSource.load_from_api(
-                broker, symbols, start_date, end_date
+                broker, symbols, actual_data_start, end_date
             )
         
         if not historical_data:
@@ -245,6 +254,33 @@ class BacktestEngine:
         # 각 종목 데이터 건수 로깅
         for symbol, df in historical_data.items():
             self.logger.info(f"{symbol} 데이터: {len(df)}일")
+            
+            # 워밍업 기간 충뵡0성 검증
+            min_period = getattr(strategy, 'long_period', 20)
+            if len(df) < min_period:
+                self.logger.warning(f"{symbol} 데이터 부족: {len(df)}일 < {min_period}일 (필요)")
+                self.logger.warning(f"  ➜ {symbol} 종목은 백테스트에서 제외됩니다.")
+        
+        # 충뵡0한 데이터가 있는 종목만 필터링
+        min_period = getattr(strategy, 'long_period', 20)
+        valid_data = {sym: df for sym, df in historical_data.items() if len(df) >= min_period}
+        
+        if not valid_data:
+            self.logger.error(f"모든 종목의 데이터가 부족합니다 (최소 {min_period}일 필요)")
+            self.logger.error(f"해결: --start 날짜를 더 늦게 설정하거나, 더 오래된 데이터를 사용하세요.")
+            return {
+                'metrics': {},
+                'equity_curve': [],
+                'trades': [],
+                'final_positions': {},
+                'final_cash': self.initial_capital
+            }
+        
+        if len(valid_data) < len(historical_data):
+            excluded = set(historical_data.keys()) - set(valid_data.keys())
+            self.logger.warning(f"데이터 부족으로 제외된 종목: {', '.join(excluded)}")
+        
+        historical_data = valid_data
         
         # 모든 거래일 수집 (합집합)
         all_dates = set()
@@ -262,10 +298,18 @@ class BacktestEngine:
                 'final_cash': self.initial_capital
             }
         
-        self.logger.info(f"총 거래일: {len(all_dates)}일")
+        # 실제 백테스트 기간 필터링 (워밍업 기간 제외)
+        start_dt = datetime.strptime(start_date, "%Y%m%d")
+        backtest_dates = [d for d in all_dates if d >= start_dt]
         
-        # 날짜별 시뮬레이션
-        for date in all_dates:
+        self.logger.info(f"전체 데이터 기간: {len(all_dates)}일")
+        self.logger.info(f"백테스트 거래일: {len(backtest_dates)}일 (워밍업 제외)")
+        
+        # 시그널 통계
+        signal_stats = {'buy': 0, 'sell': 0, 'none': 0, 'data_insufficient': 0}
+        
+        # 날짜별 시뮬레이션 (워밍업 기간 이후만)
+        for idx, date in enumerate(backtest_dates):
             date_str = date.strftime('%Y%m%d')
             
             # 해당 날짜의 가격 정보 수집
@@ -274,6 +318,11 @@ class BacktestEngine:
                 day_data = df[df['date'] == date]
                 if not day_data.empty:
                     current_prices[symbol] = float(day_data.iloc[0]['stck_clpr'])
+            
+            # 진행상황 로깅 (10% 단위)
+            if idx % max(1, len(backtest_dates) // 10) == 0:
+                progress = (idx / len(backtest_dates)) * 100
+                self.logger.info(f"진행: {progress:.0f}% ({idx}/{len(backtest_dates)}일) - 거래: {len(self.trades)}건, 보유: {len([p for p in self.positions.values() if p['qty'] > 0])}종목")
             
             # 각 종목에 대해 전략 실행
             for symbol in symbols:
@@ -287,13 +336,22 @@ class BacktestEngine:
                 # 전략에 필요한 최소 데이터 확인
                 min_period = getattr(strategy, 'long_period', 20)
                 if len(symbol_data_until_now) < min_period:
+                    signal_stats['data_insufficient'] += 1
                     continue  # 데이터 부족
                 
-                # 전략 시그널 생성
-                signal = strategy.analyze_data(symbol, symbol_data_until_now)
+                # 전략 시그널 생성 (첫 10일과 마지막 10일은 디버그 모드)
+                debug_mode = idx < 10 or idx >= len(backtest_dates) - 10
+                signal = strategy.analyze_data(symbol, symbol_data_until_now, debug=debug_mode)
                 
                 if signal is None:
+                    signal_stats['none'] += 1
                     continue
+                
+                # 시그널 통계
+                if signal['action'] == 'buy':
+                    signal_stats['buy'] += 1
+                elif signal['action'] == 'sell':
+                    signal_stats['sell'] += 1
                 
                 # 거래 실행
                 action = signal['action']
@@ -334,7 +392,16 @@ class BacktestEngine:
             all_dates[-1].strftime('%Y-%m-%d')
         )
         
-        self.logger.info("백테스트 완료")
+        # 시그널 통계 출력
+        total_checks = sum(signal_stats.values())
+        self.logger.info("\n=== 시그널 통계 ===")
+        self.logger.info(f"총 체크: {total_checks}회")
+        self.logger.info(f"  매수 시그널: {signal_stats['buy']}회 ({signal_stats['buy']/max(1,total_checks)*100:.1f}%)")
+        self.logger.info(f"  매도 시그널: {signal_stats['sell']}회 ({signal_stats['sell']/max(1,total_checks)*100:.1f}%)")
+        self.logger.info(f"  시그널 없음: {signal_stats['none']}회 ({signal_stats['none']/max(1,total_checks)*100:.1f}%)")
+        self.logger.info(f"  데이터 부족: {signal_stats['data_insufficient']}회 ({signal_stats['data_insufficient']/max(1,total_checks)*100:.1f}%)")
+        
+        self.logger.info("\n백테스트 완료")
         self.logger.info(f"최종 자산: {metrics['final_capital']:,.0f}원")
         self.logger.info(f"총 수익률: {metrics['total_return_pct']:.2f}%")
         self.logger.info(f"MDD: {metrics['mdd_pct']:.2f}%")

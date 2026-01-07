@@ -38,20 +38,23 @@ class MovingAverageCrossover(BaseStrategy):
         
         self.logger.info(f"이동평균 설정: 단기={self.short_period}일, 장기={self.long_period}일")
     
-    def analyze_data(self, symbol: str, data):
+    def analyze_data(self, symbol: str, data, debug: bool = False):
         """
         과거 데이터 분석 (백테스트용)
         
         Args:
             symbol: 종목코드
             data: 과거 데이터 DataFrame
+            debug: 디버그 정보 출력 여부
             
         Returns:
-            {'action': 'buy'|'sell'|'hold', 'reason': str} 또는 None
+            {'action': 'buy'|'sell'|'hold', 'reason': str, 'debug': dict} 또는 None
         """
         import pandas as pd
         
         if data is None or len(data) < self.long_period:
+            if debug:
+                self.logger.debug(f"[{symbol}] 데이터 부족: {len(data) if data is not None else 0}/{self.long_period}")
             return None
         
         # 가격 데이터 추출
@@ -69,6 +72,7 @@ class MovingAverageCrossover(BaseStrategy):
         # 현재 값
         current_short = short_ma.iloc[-1]
         current_long = long_ma.iloc[-1]
+        current_price = prices.iloc[-1]
         
         # 이전 값 (교차 감지용)
         if len(short_ma) < 2:
@@ -76,19 +80,43 @@ class MovingAverageCrossover(BaseStrategy):
         prev_short = short_ma.iloc[-2]
         prev_long = long_ma.iloc[-2]
         
-        # 골든크로스 감지
-        if prev_short <= prev_long and current_short > current_long:
-            return {
-                'action': 'buy',
-                'reason': f'골든크로스 (단기MA: {current_short:.0f}, 장기MA: {current_long:.0f})'
-            }
+        # 디버그 정보
+        debug_info = {
+            'price': current_price,
+            'short_ma': current_short,
+            'long_ma': current_long,
+            'prev_short_ma': prev_short,
+            'prev_long_ma': prev_long,
+            'short_above_long': current_short > current_long,
+            'prev_short_above_long': prev_short > prev_long
+        }
         
-        # 데드크로스 감지
-        elif prev_short >= prev_long and current_short < current_long:
-            return {
-                'action': 'sell',
-                'reason': f'데드크로스 (단기MA: {current_short:.0f}, 장기MA: {current_long:.0f})'
+        # 골든크로스 감지 (이전: 단기 <= 장기, 현재: 단기 > 장기)
+        if prev_short <= prev_long and current_short > current_long:
+            result = {
+                'action': 'buy',
+                'reason': f'골든크로스 (단기MA: {current_short:.0f}, 장기MA: {current_long:.0f})',
+                'debug': debug_info
             }
+            if debug:
+                self.logger.info(f"[{symbol}] {result['reason']}")
+            return result
+        
+        # 데드크로스 감지 (이전: 단기 >= 장기, 현재: 단기 < 장기)
+        elif prev_short >= prev_long and current_short < current_long:
+            result = {
+                'action': 'sell',
+                'reason': f'데드크로스 (단기MA: {current_short:.0f}, 장기MA: {current_long:.0f})',
+                'debug': debug_info
+            }
+            if debug:
+                self.logger.info(f"[{symbol}] {result['reason']}")
+            return result
+        
+        # 시그널 없음
+        if debug:
+            status = "상승세" if current_short > current_long else "하락세"
+            self.logger.debug(f"[{symbol}] 시그널 없음 - {status} (단기: {current_short:.0f}, 장기: {current_long:.0f})")
         
         return None
     
