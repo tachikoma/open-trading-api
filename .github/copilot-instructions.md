@@ -142,6 +142,7 @@ python run_bot.py
 - **설정 파일 위치**: `~/KIS/config/kis_devlp.yaml` (사용자 홈 디렉토리)
 - **프로젝트 루트의 kis_devlp.yaml**: 템플릿/예시일 뿐, 실제로 사용되지 않음
 - **인증 모듈**: `examples_llm/kis_auth.py` 또는 `examples_user/kis_auth.py`
+- **상세 가이드**: [KIS_CONFIG_GUIDE.md](../KIS_CONFIG_GUIDE.md) 참고
 
 ```python
 # kis_auth.py가 읽는 설정 파일 경로
@@ -269,6 +270,30 @@ def get_current_price(symbol: str) -> Optional[pd.DataFrame]:
 - **직관적 코드**: 복잡한 디자인 패턴보다 명확한 구조 선호
 - **장황해도 명확한 코드**: 한 줄 마법보다 여러 줄이라도 읽기 쉬운 코드
 
+### 테스트 파일 패턴 (examples_llm)
+
+**명명 규칙**: `chk_[함수명].py`
+
+```python
+# examples_llm/domestic_stock/inquire_price/chk_inquire_price.py
+# 1. 한 줄 호출 함수를 import
+from inquire_price import inquire_price
+
+# 2. 함수 실행 및 결과 출력
+def test_inquire_price():
+    df = inquire_price(symbol="005930")  # 삼성전자
+    print(df)
+    assert df is not None
+
+if __name__ == "__main__":
+    test_inquire_price()
+```
+
+**특징**:
+- 각 API 기능마다 독립된 테스트 파일 존재
+- 단순 실행 및 결과 확인 (복잡한 assertion 없음)
+- LLM이 API 사용법을 쉽게 학습하도록 설계
+
 ## 🏗️ 프로젝트 구조 규칙
 
 ### 핵심 원칙: KIS 코드 보호 + trading_bot 격리
@@ -321,9 +346,15 @@ def get_current_price(symbol: str) -> Optional[pd.DataFrame]:
 open-trading-api/           # 프로젝트 루트
 ├── README.md               # KIS 원본 (수정 금지 ❌)
 ├── TRADING_BOT.md          # 자동매매 봇 안내 (별도 파일)
+├── KIS_CONFIG_GUIDE.md     # KIS 설정 파일 위치 안내
 ├── pyproject.toml          # uv 설정 파일
+├── docs/
+│   └── convention.md       # KIS 코딩 컨벤션 가이드
 ├── examples_llm/           # KIS 제공 (수정 금지 ❌)
 ├── examples_user/          # KIS 제공 (수정 금지 ❌)
+├── legacy/                 # 구 샘플코드 보관 (참고용)
+├── stocks_info/            # 종목코드 참고 데이터 (.h 및 .py 파일)
+├── MCP/                    # Model Context Protocol 도구 연결 가이드
 └── trading_bot/            # 자동매매 봇 (모든 커스텀 코드)
     ├── run_bot.py          # 봇 실행 스크립트
     ├── run_backtest.py     # 백테스트 실행 스크립트
@@ -453,6 +484,30 @@ uv pip freeze > requirements.txt
 
 ## 📂 파일 및 경로 관리
 
+### 참고 자료 및 리소스
+
+#### stocks_info/ (종목코드 참고 데이터)
+- **목적**: 한국투자증권이 제공하는 종목 마스터 정보 파일
+- **파일 형식**: `.h` (헤더 파일) 및 `.py` (Python 변환 파일)
+- **내용**: 국내/해외 주식, 선물옵션, 채권, ELW 등의 종목코드 정보
+- **사용**: 종목코드 조회, 종목명 확인, 업종/테마 분류 등
+
+```python
+# 종목코드 파일 예시
+from kis_kospi_code_mst import get_kospi_master  # KOSPI 종목 마스터
+from overseas_stock_code import get_us_stock_code  # 해외주식 코드
+```
+
+#### legacy/ (구 샘플코드)
+- **목적**: 이전 버전의 샘플코드 보관
+- **상태**: 참고용, 새로운 개발에는 사용 권장하지 않음
+- **내용**: REST API, WebSocket, Postman 컬렉션 등
+
+#### MCP/ (Model Context Protocol)
+- **목적**: LLM 도구와의 통합 가이드
+- **내용**: MCP 서버 연결 방법, AI 도구 연결 설정
+- **참고**: AI 에이전트를 통한 KIS API 사용 시 활용
+
 ### 결과 파일 저장 위치
 
 ```python
@@ -516,8 +571,12 @@ uv sync
 open-trading-api/
 ├── README.md               # KIS 원본 (수정 금지 ❌)
 ├── TRADING_BOT.md          # 자동매매 봇 안내 문서
+├── KIS_CONFIG_GUIDE.md     # KIS 설정 파일 위치 안내
+├── docs/convention.md      # KIS 코딩 컨벤션
 ├── examples_llm/           # KIS 제공 (수정 금지 ❌)
 ├── examples_user/          # KIS 제공 (수정 금지 ❌)
+├── legacy/                 # 구 샘플코드 (참고용)
+├── stocks_info/            # 종목코드 참고 데이터
 └── trading_bot/            # 자동매매 봇 (모든 커스텀 코드 ✅)
     ├── run_bot.py          # 실행: cd trading_bot && uv run run_bot.py
     ├── run_backtest.py     # 실행: cd trading_bot && uv run run_backtest.py
