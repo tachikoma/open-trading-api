@@ -14,6 +14,7 @@ import sys
 import sqlite3
 from pathlib import Path
 from datetime import datetime, timedelta
+import pytz
 
 # 프로젝트 루트
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -38,7 +39,8 @@ def create_external_db(db_path: str, symbols: list, start_date: str, end_date: s
         end_date: 종료일 (YYYY-MM-DD, 기본값: 오늘)
     """
     if end_date is None:
-        end_date = datetime.now().strftime("%Y-%m-%d")
+        kst = pytz.timezone('Asia/Seoul')
+        end_date = datetime.now(kst).strftime("%Y-%m-%d")
     
     print("="*80)
     print("백테스트용 외부 DB 생성 - FinanceDataReader".center(80))

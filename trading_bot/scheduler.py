@@ -6,6 +6,7 @@
 import time
 from datetime import datetime, time as dt_time
 from typing import List
+import pytz
 
 try:
     import schedule
@@ -45,7 +46,9 @@ class SimpleScheduler:
         Returns:
             장 운영 시간이면 True
         """
-        now = datetime.now()
+        # 한국 시간대 사용
+        kst = pytz.timezone('Asia/Seoul')
+        now = datetime.now(kst)
         
         # 주말 체크
         if now.weekday() >= 5:  # 토요일(5), 일요일(6)
@@ -64,8 +67,10 @@ class SimpleScheduler:
             self.logger.info("장 운영 시간이 아닙니다. 전략을 실행하지 않습니다.")
             return
         
+        kst = pytz.timezone('Asia/Seoul')
+        now_kst = datetime.now(kst)
         self.logger.info("=" * 50)
-        self.logger.info(f"전략 실행 시작: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        self.logger.info(f"전략 실행 시작: {now_kst.strftime('%Y-%m-%d %H:%M:%S')} KST")
         self.logger.info("=" * 50)
         
         for strategy in self.strategies:

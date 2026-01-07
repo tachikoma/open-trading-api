@@ -23,6 +23,7 @@ import sys
 import argparse
 from pathlib import Path
 from datetime import datetime, timedelta
+import pytz
 
 # 프로젝트 루트를 sys.path에 추가
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -138,21 +139,25 @@ def main():
         print(f"❌ 오류: DB 파일이 없습니다: {args.db_path}")
         sys.exit(1)
     
+    # 한국 시간대 사용
+    kst = pytz.timezone('Asia/Seoul')
+    now_kst = datetime.now(kst)
+    
     # 날짜 설정
     if args.end:
         end_date = args.end
     else:
-        end_date = (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")
+        end_date = (now_kst - timedelta(days=1)).strftime("%Y%m%d")
     
     if args.start:
         start_date = args.start
     else:
         if args.source == 'api':
             # API는 최대 100일
-            start_date = (datetime.now() - timedelta(days=100)).strftime("%Y%m%d")
+            start_date = (now_kst - timedelta(days=100)).strftime("%Y%m%d")
         else:
             # DB/FDR는 2년
-            start_date = (datetime.now() - timedelta(days=730)).strftime("%Y%m%d")
+            start_date = (now_kst - timedelta(days=730)).strftime("%Y%m%d")
     
     # 워밍업 기간 계산 (장기 이동평균 계산을 위해 추가 데이터 필요)
     # 장기 이동평균 기간만큼 시작일을 앞당김
@@ -250,7 +255,8 @@ def main():
         output_dir.mkdir(parents=True, exist_ok=True)
         
         # 파일명 생성: {전략이름}_{데이터소스}_{타입}_{날짜}_{시간}.{확장자}
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        kst = pytz.timezone('Asia/Seoul')
+        timestamp = datetime.now(kst).strftime("%Y%m%d_%H%M%S")
         strategy_name = "ma_crossover"  # 전략 이름
         data_source = args.source  # 데이터 소스 (api, db, fdr)
         

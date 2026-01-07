@@ -7,6 +7,7 @@ import pandas as pd
 from pathlib import Path
 from typing import Dict, Optional
 from datetime import datetime
+import pytz
 
 
 class BacktestReport:
@@ -125,7 +126,8 @@ class BacktestReport:
             output_dir: 출력 디렉토리
             prefix: 파일명 접두사
         """
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        kst = pytz.timezone('Asia/Seoul')
+        timestamp = datetime.now(kst).strftime("%Y%m%d_%H%M%S")
         
         # 디렉토리 생성
         output_dir = Path(output_dir)

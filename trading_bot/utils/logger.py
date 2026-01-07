@@ -5,6 +5,7 @@ import logging
 import sys
 from pathlib import Path
 from datetime import datetime
+import pytz
 
 
 def setup_logger(name: str, log_dir: Path, level: str = "INFO"):
@@ -38,7 +39,9 @@ def setup_logger(name: str, log_dir: Path, level: str = "INFO"):
     
     # 파일 핸들러 (일별 로그)
     log_dir.mkdir(parents=True, exist_ok=True)
-    log_file = log_dir / f"{name}_{datetime.now().strftime('%Y%m%d')}.log"
+    kst = pytz.timezone('Asia/Seoul')
+    now_kst = datetime.now(kst)
+    log_file = log_dir / f"{name}_{now_kst.strftime('%Y%m%d')}.log"
     file_handler = logging.FileHandler(log_file, encoding='utf-8')
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
