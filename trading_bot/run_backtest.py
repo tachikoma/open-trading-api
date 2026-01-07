@@ -154,6 +154,12 @@ def main():
             # DB/FDR는 2년
             start_date = (datetime.now() - timedelta(days=730)).strftime("%Y%m%d")
     
+    # 워밍업 기간 계산 (장기 이동평균 계산을 위해 추가 데이터 필요)
+    # 장기 이동평균 기간만큼 시작일을 앞당김
+    warmup_days = args.long_period
+    # *3을 곱하는 이유: 주말/공휴일 제외하고 충분한 거래일 확보 (200일*3 = 600력일)
+    data_start_date = (datetime.strptime(start_date, "%Y%m%d") - timedelta(days=warmup_days * 3)).strftime("%Y%m%d")
+    
     # 종목 설정
     symbols = args.symbols if args.symbols else Config.WATCH_LIST
     
@@ -170,6 +176,7 @@ def main():
         print(f"  DB 경로: {args.db_path}")
     print(f"  초기 자본금: {args.capital:,}원")
     print(f"  백테스트 기간: {start_date} ~ {end_date}")
+    print(f"  데이터 로드 기간: {data_start_date} ~ {end_date} (워밍업 {warmup_days}일 포함)")
     print(f"  대상 종목: {', '.join(symbols)}")
     print(f"  전략: 이동평균 교차 (단기 {args.short_period}일, 장기 {args.long_period}일)")
     print()
