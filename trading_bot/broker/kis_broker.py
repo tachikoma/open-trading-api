@@ -157,20 +157,146 @@ class KISBroker:
             기간별 시세 DataFrame (output2)
         """
         try:
+            # Use internal caller that inspects raw API response and raises only on rate-limit
             output1, output2 = self._call_with_retry(
-                dsf.inquire_daily_itemchartprice,
-                env_dv=self.env_mode,
-                fid_cond_mrkt_div_code="J",
-                fid_input_iscd=symbol,
-                fid_input_date_1=start_date,
-                fid_input_date_2=end_date,
-                fid_period_div_code=period,
-                fid_org_adj_prc="0"  # 0:수정주가, 1:원주가
+                self._call_period_api,
+                symbol=symbol,
+                start_date=start_date,
+                end_date=end_date,
+                period=period
             )
             return output2  # output2에 일별 시세 데이터가 있음
         except Exception as e:
             self.logger.error(f"기간별 시세 조회 실패 ({symbol}): {e}")
             return None
+
+    def _call_period_api(self, symbol: str, start_date: str, end_date: str, period: str = "D"):
+        """
+        내부: KIS API를 직접 호출하여 응답을 검사합니다.
+        - rate-limit(EGW00201 등)인 경우 예외를 발생시켜 상위에서 재시도하도록 함
+        - 그 외의 경우에는 빈 DataFrame을 반환하여 재시도하지 않습니다
+        """
+        api_url = "/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice"
+        tr_id = "FHKST03010100"
+
+        params = {
+            "FID_COND_MRKT_DIV_CODE": "J",
+            "FID_INPUT_ISCD": symbol,
+            "FID_INPUT_DATE_1": start_date,
+            "FID_INPUT_DATE_2": end_date,
+            "FID_PERIOD_DIV_CODE": period,
+            "FID_ORG_ADJ_PRC": "0",
+        }
+
+        # 직접 호출하여 APIResp를 확인
+        res = ka._url_fetch(api_url, tr_id, "", params)
+
+        try:
+            if getattr(res, 'isOK', lambda: False)() is True:
+                output1 = pd.DataFrame([res.getBody().output1])
+                output2 = pd.DataFrame(res.getBody().output2)
+                return output1, output2
+            else:
+                # 에러 메시지 추출
+                try:
+                    msg = res.getErrorMessage() or ""
+                except Exception:
+                    msg = str(res)
+
+                # rate-limit인 경우 재시도하도록 예외 발생
+                if "EGW00201" in msg or "초당 거래건수" in msg or "초당 거래건수를 초과" in msg:
+                    raise Exception(f"API rate limit: {msg}")
+
+                # 그 외는 빈 응답(데이터 없음)으로 간주
+                return pd.DataFrame(), pd.DataFrame()
+        except Exception:
+            # 예외는 상위에서 처리(재시도 대상)
+            raise
+
+    def _normalize_df(self, df: pd.DataFrame) -> Optional[pd.DataFrame]:
+        """
+        내부: API 응답 DataFrame을 날짜 인덱스로 정규화합니다.
+        """
+        if df is None or df.empty:
+            return None
+
+        # 이미 DatetimeIndex라면 그대로 반환
+        if isinstance(df.index, pd.DatetimeIndex):
+            return df
+
+        # 흔히 사용되는 날짜 컬럼명들 처리
+        for col in ("stck_bsop_date", "trd_dd", "tdd_clse_dt", "date"):
+            if col in df.columns:
+                try:
+                    df = df.copy()
+                    df["_date_col_for_index"] = pd.to_datetime(df[col], format="%Y%m%d", errors="coerce")
+                    df = df.set_index("_date_col_for_index")
+                    df.index.name = None
+                    return df
+                except Exception:
+                    continue
+
+        # 인덱스를 DatetimeIndex로 변환 시도
+        try:
+            df = df.copy()
+            df.index = pd.to_datetime(df.index)
+            return df
+        except Exception:
+            return df
+
+    def fetch_10y_daily(self, symbol: str = "005930", save_path: Optional[str] = None) -> Optional[pd.DataFrame]:
+        """
+        지정한 종목의 최근 10년치 일별 시세를 KIS API로 수집합니다.
+
+        - 3개월 단위로 구간을 나누어 `get_period_price`를 호출합니다.
+        - 결과를 병합하고 중복 제거 및 정렬을 수행합니다.
+        """
+        end = pd.Timestamp.today().normalize()
+        start = end - pd.DateOffset(years=10)
+
+        parts = []
+        current = start
+        while current <= end:
+            chunk_end = min(current + pd.DateOffset(months=3) - pd.DateOffset(days=1), end)
+            s = current.strftime("%Y%m%d")
+            e = chunk_end.strftime("%Y%m%d")
+            self.logger.info(f"Fetching {symbol} {s} ~ {e}")
+
+            try:
+                df = self.get_period_price(symbol, s, e, period="D")
+            except Exception as ex:
+                self.logger.error(f"구간 호출 실패: {s} ~ {e}: {ex}")
+                df = None
+
+            if df is not None and not df.empty:
+                ndf = self._normalize_df(df)
+                if ndf is not None and not ndf.empty:
+                    parts.append(ndf)
+            else:
+                self.logger.warning(f"응답 없음 또는 빈 데이터: {s} ~ {e}")
+
+            current = chunk_end + pd.DateOffset(days=1)
+            time.sleep(0.2)
+
+        if not parts:
+            self.logger.error("데이터를 수집하지 못했습니다.")
+            return None
+
+        result = pd.concat(parts)
+        try:
+            result = result[~result.index.duplicated(keep='first')]
+            result = result.sort_index()
+        except Exception:
+            result = result.drop_duplicates()
+
+        if save_path:
+            try:
+                result.to_csv(save_path, index=True)
+                self.logger.info(f"Saved historical data to {save_path}")
+            except Exception as e:
+                self.logger.warning(f"CSV 저장 실패: {e}")
+
+        return result
     
     def get_asking_price(self, symbol: str) -> Optional[Tuple[pd.DataFrame, pd.DataFrame]]:
         """
@@ -381,3 +507,17 @@ class KISBroker:
         except Exception as e:
             self.logger.error(f"주문 취소 실패 ({order_no}): {e}")
             return {"success": False, "message": str(e)}
+
+
+if __name__ == "__main__":
+    # 간단한 수동 실행용 (uv run trading_bot/broker/kis_broker.py 권장)
+    try:
+        kb = KISBroker(env_mode="demo")
+        df = kb.fetch_10y_daily(symbol="005930", save_path="samsung_10y_kis.csv")
+        if df is not None:
+            print(df.tail())
+            print(f"Saved {len(df)} rows to samsung_10y_kis.csv")
+        else:
+            print("데이터 수집 실패")
+    except Exception as e:
+        print(f"실행 중 오류: {e}")
