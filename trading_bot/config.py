@@ -36,6 +36,9 @@ class Config:
     # 주문 설정
     MAX_POSITION_SIZE = 1000000  # 최대 투자 금액 (100만원)
     MAX_ORDER_AMOUNT = 500000    # 1회 최대 주문 금액 (50만원)
+
+    # 기본 거래소 코드 (예: KRX)
+    DEFAULT_EXCHANGE = "KRX"
     
     # 로깅 설정
     LOG_DIR = Path(__file__).parent / "logs"
