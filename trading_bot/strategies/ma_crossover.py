@@ -306,8 +306,8 @@ class MovingAverageCrossover(BaseStrategy):
             
             current_price = int(price_df.iloc[0]['stck_prpr'])
             
-            # 매수가능 금액 조회
-            available_cash = self.broker.get_buyable_cash()
+            # 매수가능 금액 조회 (종목 및 현재가 기준)
+            available_cash = self.broker.get_buyable_cash(symbol, current_price)
             if available_cash is None or available_cash == 0:
                 self.logger.warning(f"[{symbol}] 매수 가능 금액 없음")
                 return
