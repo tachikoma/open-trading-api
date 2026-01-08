@@ -26,10 +26,6 @@ try:
     bal = broker.get_balance()
     print('get_balance =>', type(bal), bal if isinstance(bal, tuple) else bal)
 
-    print('\n== get_buyable_cash ==')
-    buy_cash = broker.get_buyable_cash()
-    print('get_buyable_cash =>', buy_cash)
-
     print('\n== get_current_price(005930) ==')
     price_df = broker.get_current_price("005930")
     print('get_current_price => type:', type(price_df))
@@ -37,6 +33,23 @@ try:
         print(price_df.head())
     except Exception:
         print(price_df)
+
+    print('\n== get_buyable_cash ==')
+    current_price = 0
+    if price_df is not None and not getattr(price_df, 'empty', False):
+        try:
+            current_price = int(price_df.iloc[0]['stck_prpr'])
+        except Exception:
+            for col in ['close', 'stck_clpr', 'clpr', 'prpr', 'last']:
+                if col in price_df.columns:
+                    try:
+                        current_price = int(price_df.iloc[0][col])
+                        break
+                    except Exception:
+                        continue
+
+    buy_cash = broker.get_buyable_cash("005930", current_price)
+    print('get_buyable_cash =>', buy_cash)
 
     print('\n== buy (dry-run) ==')
     buy_res = broker.buy("005930", qty=1, price=0, order_type="01")

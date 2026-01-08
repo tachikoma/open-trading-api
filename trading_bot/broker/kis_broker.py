@@ -74,25 +74,111 @@ class KISBroker:
             self.logger.error(f"KIS 인증 초기화 실패: {e}")
             raise
 
-    def _call_with_retry(self, func, *args, max_retries: int = 3, delay_sec: float = 0.5, **kwargs):
+    def _call_with_retry(self, func, *args, max_retries: int = 3, delay_sec: float = 0.5, check_result=None, **kwargs):
         """공통 재시도 래퍼
 
-        - API rate limit 응답(EGW00201 또는 '초당 거래건수' 메시지)을 감지하면
+        - 예외가 발생하거나 `check_result` 콜백이 재시도를 요청하는 경우
           `delay_sec` 만큼 대기 후 최대 `max_retries` 회 재시도합니다.
-        - 마지막 시도에서 예외가 발생하면 예외를 재발생시킵니다.
+        - `check_result(result, exception)`는 호출 결과와 예외(있을 경우)를
+          받아 `True`(재시도 필요) 또는 `False`(재시도 불필요)를 반환해야 합니다.
+        - 기본 동작은 기존과 동일: 예외 메시지에 `EGW00201` 또는 '초당 거래건수'
+          관련 텍스트가 포함되면 재시도합니다.
         """
         for attempt in range(1, max_retries + 1):
             try:
-                return func(*args, **kwargs)
+                result = func(*args, **kwargs)
+
+                # 결과 기반 재시도 판단 콜백이 제공된 경우 호출
+                if callable(check_result):
+                    try:
+                        should_retry = bool(check_result(result, None))
+                    except Exception as cb_e:
+                        self.logger.warning(f"check_result 콜백 실행 중 오류: {cb_e}")
+                        should_retry = False
+
+                    if should_retry:
+                        self.logger.warning(f"check_result 요청으로 재시도합니다. (시도 {attempt}/{max_retries})")
+                        if attempt < max_retries:
+                            time.sleep(delay_sec)
+                            continue
+                        else:
+                            raise Exception("check_result 요청으로 재시도했으나 최대 시도 초과")
+
+                return result
+
             except Exception as e:
+                # 예외 기반 재시도 판단: check_result에 예외를 전달해 의사결정 위임
+                if callable(check_result):
+                    try:
+                        should_retry = bool(check_result(None, e))
+                    except Exception as cb_e:
+                        self.logger.warning(f"check_result 콜백 실행 중 오류: {cb_e}")
+                        should_retry = False
+
+                    if should_retry:
+                        self.logger.warning(f"check_result 요청으로 예외에서 재시도합니다: {e} (시도 {attempt}/{max_retries})")
+                        if attempt < max_retries:
+                            time.sleep(delay_sec)
+                            continue
+                        else:
+                            raise
+
+                # 기존 예외 메시지 기반 재시도 (rate limit)
                 msg = str(e)
                 if "EGW00201" in msg or "초당 거래건수" in msg or "초당 거래건수를 초과" in msg:
                     self.logger.warning(f"API rate limit 응답 감지: {msg} (시도 {attempt}/{max_retries}). 재시도합니다.")
                     if attempt < max_retries:
                         time.sleep(delay_sec)
                         continue
+
                 # 재시도 대상이 아니거나 마지막 시도인 경우 예외 재발생
                 raise
+
+    def _check_retry_on_empty_or_rate_limit(self, result, exception) -> bool:
+        """기본 재시도 판정기
+
+        - 예외가 주어지면 rate-limit 관련 메시지(EGW00201 등)가 있는지 검사
+        - 결과가 None 또는 DataFrame이고 비어있으면 재시도 권장
+        - 결과가 튜플인 경우 모든 요소가 비어있을 때만 재시도 권장
+        """
+        # 예외 기반 판정
+        if exception is not None:
+            msg = str(exception)
+            if "EGW00201" in msg or "초당 거래건수" in msg or "초당 거래건수를 초과" in msg:
+                return True
+            return False
+
+        # 결과 기반 판정
+        if result is None:
+            return True
+
+        # pandas 판정을 지연 import로 처리
+        try:
+            import pandas as _pd
+        except Exception:
+            _pd = None
+
+        # DataFrame 빈값 판정
+        if _pd is not None and isinstance(result, _pd.DataFrame):
+            return result.empty
+
+        # 튜플/리스트인 경우 모든 요소가 비어있을 때만 재시도
+        if isinstance(result, (tuple, list)):
+            has_any = False
+            for r in result:
+                if r is None:
+                    continue
+                if _pd is not None and isinstance(r, _pd.DataFrame):
+                    if not r.empty:
+                        has_any = True
+                        break
+                else:
+                    # 비-DataFrame 결과가 존재하면 재시도 불필요
+                    has_any = True
+                    break
+            return not has_any
+
+        return False
     
     # ==================== 시세 조회 ====================
     
@@ -111,7 +197,8 @@ class KISBroker:
                 dsf.inquire_price,
                 env_dv=self.env_mode,
                 fid_cond_mrkt_div_code="J",
-                fid_input_iscd=symbol
+                fid_input_iscd=symbol,
+                check_result=self._check_retry_on_empty_or_rate_limit
             )
             return df
         except Exception as e:
@@ -136,7 +223,8 @@ class KISBroker:
                 fid_cond_mrkt_div_code="J",
                 fid_input_iscd=symbol,
                 fid_period_div_code=period,
-                fid_org_adj_prc="0"  # 0:수정주가, 1:원주가
+                fid_org_adj_prc="0",  # 0:수정주가, 1:원주가
+                check_result=self._check_retry_on_empty_or_rate_limit
             )
             return df
         except Exception as e:
@@ -165,7 +253,8 @@ class KISBroker:
                 fid_input_date_1=start_date,
                 fid_input_date_2=end_date,
                 fid_period_div_code=period,
-                fid_org_adj_prc="0"  # 0:수정주가, 1:원주가
+                fid_org_adj_prc="0",  # 0:수정주가, 1:원주가
+                check_result=self._check_retry_on_empty_or_rate_limit
             )
             return output2  # output2에 일별 시세 데이터가 있음
         except Exception as e:
@@ -187,7 +276,8 @@ class KISBroker:
                 dsf.inquire_asking_price_exp_ccn,
                 env_dv=self.env_mode,
                 fid_cond_mrkt_div_code="J",
-                fid_input_iscd=symbol
+                fid_input_iscd=symbol,
+                check_result=self._check_retry_on_empty_or_rate_limit
             )
             return result
         except Exception as e:
@@ -214,61 +304,47 @@ class KISBroker:
                 unpr_dvsn="01",
                 fund_sttl_icld_yn="N",
                 fncg_amt_auto_rdpt_yn="N",
-                prcs_dvsn="00"
+                prcs_dvsn="00",
+                check_result=self._check_retry_on_empty_or_rate_limit
             )
             return df1, df2
         except Exception as e:
             self.logger.error(f"잔고 조회 실패: {e}")
             return None, None
     
-    def get_buyable_cash(self) -> Optional[int]:
+    def get_buyable_cash(self, symbol: str = "", price: int = 0) -> Optional[int]:
         """
         매수가능 현금 조회
-        
+
+        Args:
+            symbol: 조회할 종목코드 (빈문자열이면 종목 미지정)
+            price: 주문가 (정수, 기본 0: 시장가)
+
         Returns:
             매수가능 금액
         """
-        # 일부 API는 과도한 호출 시 오류를 반환하고 빈 DataFrame을 리턴합니다.
-        # 따라서 빈 응답 또는 EGW00201(초당 거래건수 초과) 예외가 발생하면
-        # 0.5초 대기 후 최대 3회까지 재시도합니다.
-        max_retries = 3
-        delay_sec = 0.5
+        try:
+            df = self._call_with_retry(
+                dsf.inquire_psbl_order,
+                env_dv=self.env_mode,
+                cano=self.account,
+                acnt_prdt_cd=self.product_code,
+                pdno=symbol,
+                ord_unpr=str(price),
+                ord_dvsn="01",
+                cma_evlu_amt_icld_yn="N",
+                ovrs_icld_yn="N",
+                check_result=self._check_retry_on_empty_or_rate_limit,
+            )
 
-        for attempt in range(1, max_retries + 1):
-            try:
-                df = dsf.inquire_psbl_order(
-                    env_dv=self.env_mode,
-                    cano=self.account,
-                    acnt_prdt_cd=self.product_code,
-                    pdno="005930",  # 임의의 종목코드 (삼성전자)
-                    ord_unpr="0",
-                    ord_dvsn="01",  # 시장가
-                    cma_evlu_amt_icld_yn="N",
-                    ovrs_icld_yn="N"
-                )
+            if df is not None and not df.empty:
+                return int(df.iloc[0].get('ord_psbl_cash') or df.iloc[0].get('nrcvb_buy_amt') or df.iloc[0].get('max_buy_amt') or 0)
 
-                # 정상 응답이면 값 반환
-                if df is not None and not df.empty:
-                    return int(df.iloc[0]['ord_psbl_cash'])
-
-                # 빈 DataFrame은 오류(예: rate limit)일 가능성이 있으므로 재시도
-                self.logger.warning(f"매수가능 현금 조회 응답 비어있음 (시도 {attempt}/{max_retries}). 재시도합니다.")
-            except Exception as e:
-                msg = str(e)
-                # EGW00201 또는 초당 거래건수 초과 메시지 감지 시 재시도
-                if "EGW00201" in msg or "초당 거래건수를 초과" in msg:
-                    self.logger.warning(f"API rate limit 응답 감지: {msg} (시도 {attempt}/{max_retries}). 재시도합니다.")
-                else:
-                    self.logger.error(f"매수가능 현금 조회 실패: {e}")
-                    return 0
-
-            # 재시도 간 대기 (마지막 시도라면 대기 없이 종료)
-            if attempt < max_retries:
-                time.sleep(delay_sec)
-
-        # 모든 재시도 실패
-        self.logger.error(f"매수가능 현금 조회 실패: 최대 재시도({max_retries}) 초과")
-        return 0
+            self.logger.warning(f"매수가능 현금 조회 응답 비어있음. symbol={symbol!r}, price={price}. 재시도하지 않습니다.")
+            return 0
+        except Exception as e:
+            self.logger.error(f"매수가능 현금 조회 실패: {e}")
+            return 0
     
     # ==================== 주문 ====================
     
@@ -300,7 +376,8 @@ class KISBroker:
                 ord_dvsn=order_type,
                 ord_qty=str(qty),
                 ord_unpr=str(price),
-                excg_id_dvsn_cd=Config.DEFAULT_EXCHANGE
+                excg_id_dvsn_cd=Config.DEFAULT_EXCHANGE,
+                check_result=self._check_retry_on_empty_or_rate_limit
             )
             
             self.logger.info(f"매수 주문 완료: {symbol}, 수량: {qty}, 가격: {price}")
@@ -337,7 +414,8 @@ class KISBroker:
                 ord_dvsn=order_type,
                 ord_qty=str(qty),
                 ord_unpr=str(price),
-                excg_id_dvsn_cd=Config.DEFAULT_EXCHANGE
+                excg_id_dvsn_cd=Config.DEFAULT_EXCHANGE,
+                check_result=self._check_retry_on_empty_or_rate_limit
             )
             
             self.logger.info(f"매도 주문 완료: {symbol}, 수량: {qty}, 가격: {price}")
@@ -375,7 +453,8 @@ class KISBroker:
                 rvse_cncl_dvsn_cd="02",  # 취소:02
                 ord_qty=str(qty),
                 ord_unpr="0",
-                qty_all_ord_yn="Y" if qty == 0 else "N"
+                qty_all_ord_yn="Y" if qty == 0 else "N",
+                check_result=self._check_retry_on_empty_or_rate_limit
             )
             
             self.logger.info(f"주문 취소 완료: {order_no}")
