@@ -131,25 +131,56 @@ class MovingAverageCrossover(BaseStrategy):
             (단기이평, 장기이평, 현재가, 이전_단기이평, 이전_장기이평) 또는 None
         """
         try:
-            # 일별 시세 조회 (장기 이평 계산을 위해 넉넉하게)
+            # 1) 기본: 일별 시세 조회 (최근 30거래일 제한)
             df = self.broker.get_daily_price(symbol, period="D")
-            
-            if df is None or df.empty:
+
+            # 2) 조회 결과가 없으면 기간 조회로 대체 시도 (더 넓은 범위)
+            if df is None or (hasattr(df, 'empty') and df.empty):
+                from datetime import datetime, timedelta
+                end_date = datetime.now().strftime("%Y%m%d")
+                start_date = (datetime.now() - timedelta(days=365)).strftime("%Y%m%d")
+                df = self.broker.get_period_price(symbol, start_date, end_date, period="D")
+
+            # 3) 여전히 데이터가 없으면 경고
+            if df is None or (hasattr(df, 'empty') and df.empty):
                 self.logger.warning(f"[{symbol}] 시세 데이터 없음")
                 return None
-            
-            # 종가 컬럼 확인
-            if 'stck_clpr' not in df.columns:
-                self.logger.error(f"[{symbol}] 종가 컬럼 없음")
+
+            # 4) 종가 컬럼 식별 (여러 API 반환 형식에 대응)
+            close_col = None
+            preferred = ['stck_clpr', 'close', 'clpr', 'prpr', 'adj_prc', 'adj_close', 'price', 'last']
+            for c in preferred:
+                if c in df.columns:
+                    close_col = c
+                    break
+
+            if close_col is None:
+                # 숫자형 컬럼 중 이름에 pr/cl/close/price 포함되는 컬럼 우선 선택
+                for c in df.columns:
+                    lc = c.lower()
+                    if ('pr' in lc or 'cl' in lc or 'close' in lc or 'price' in lc) and pd.api.types.is_numeric_dtype(df[c]):
+                        close_col = c
+                        break
+
+            if close_col is None:
+                # 마지막 수단: 숫자형 컬럼 중 첫번째
+                for c in df.columns:
+                    if pd.api.types.is_numeric_dtype(df[c]):
+                        close_col = c
+                        break
+
+            if close_col is None:
+                self.logger.error(f"[{symbol}] 종가 컬럼 없음: columns={list(df.columns)}")
                 return None
-            
+
             # 종가를 숫자로 변환
-            df['close'] = pd.to_numeric(df['stck_clpr'], errors='coerce')
+            df.loc[:, 'close'] = pd.to_numeric(df[close_col], errors='coerce')
 
             # 날짜 컬럼이 있으면 오름차순(과거->최신)으로 정렬, 없으면 역순으로 만들어 과거->최신 보장
             date_col = None
             for c in df.columns:
-                if 'date' in c.lower() or 'bsop' in c.lower():
+                lc = c.lower()
+                if 'date' in lc or 'bsop' in lc or 'trd' in lc:
                     date_col = c
                     break
             if date_col is not None:
@@ -158,29 +189,30 @@ class MovingAverageCrossover(BaseStrategy):
                 df = df.iloc[::-1].reset_index(drop=True)
 
             # 이동평균 계산 (이제 최신이 마지막 행)
-            df['ma_short'] = df['close'].rolling(window=self.short_period).mean()
-            df['ma_long'] = df['close'].rolling(window=self.long_period).mean()
+            df.loc[:, 'ma_short'] = df['close'].rolling(window=self.short_period).mean()
+            df.loc[:, 'ma_long'] = df['close'].rolling(window=self.long_period).mean()
 
             # 충분한 데이터가 있어야 최신값과 이전값의 MA가 계산된다
-            if len(df) < self.long_period or len(df) < 2:
-                self.logger.warning(f"[{symbol}] 이동평균 계산에 필요한 데이터 부족 ({len(df)}/{self.long_period})")
+            # rolling(window=N) 첫 유효값은 index N-1 -> 최신과 이전값 둘 다 존재하려면 N+1개 이상
+            if len(df) < (self.long_period + 1):
+                self.logger.warning(f"[{symbol}] 이동평균 계산에 필요한 데이터 부족 ({len(df)}/{self.long_period + 1})")
                 return None
 
             latest = df.iloc[-1]
             prev = df.iloc[-2]  # 이전 데이터
-            
+
             ma_short = latest['ma_short']
             ma_long = latest['ma_long']
             current_price = latest['close']
             prev_ma_short = prev['ma_short']
             prev_ma_long = prev['ma_long']
-            
+
             if pd.isna(ma_short) or pd.isna(ma_long) or pd.isna(prev_ma_short) or pd.isna(prev_ma_long):
                 self.logger.warning(f"[{symbol}] 이동평균 계산 불가 (데이터 부족)")
                 return None
-            
+
             return ma_short, ma_long, current_price, prev_ma_short, prev_ma_long
-            
+
         except Exception as e:
             self.logger.error(f"[{symbol}] 이동평균 계산 중 오류: {e}")
             return None
