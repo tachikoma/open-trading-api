@@ -145,18 +145,29 @@ class MovingAverageCrossover(BaseStrategy):
             
             # 종가를 숫자로 변환
             df['close'] = pd.to_numeric(df['stck_clpr'], errors='coerce')
-            
-            # 이동평균 계산
+
+            # 날짜 컬럼이 있으면 오름차순(과거->최신)으로 정렬, 없으면 역순으로 만들어 과거->최신 보장
+            date_col = None
+            for c in df.columns:
+                if 'date' in c.lower() or 'bsop' in c.lower():
+                    date_col = c
+                    break
+            if date_col is not None:
+                df = df.sort_values(by=date_col).reset_index(drop=True)
+            else:
+                df = df.iloc[::-1].reset_index(drop=True)
+
+            # 이동평균 계산 (이제 최신이 마지막 행)
             df['ma_short'] = df['close'].rolling(window=self.short_period).mean()
             df['ma_long'] = df['close'].rolling(window=self.long_period).mean()
-            
-            # 최신 데이터 (domestic_stock_functions는 최신날짜가 첫 행)
-            if len(df) < 2:
-                self.logger.warning(f"[{symbol}] 이전 데이터 부족 (교차 감지 불가)")
+
+            # 충분한 데이터가 있어야 최신값과 이전값의 MA가 계산된다
+            if len(df) < self.long_period or len(df) < 2:
+                self.logger.warning(f"[{symbol}] 이동평균 계산에 필요한 데이터 부족 ({len(df)}/{self.long_period})")
                 return None
-                
-            latest = df.iloc[0]
-            prev = df.iloc[1]  # 이전 데이터
+
+            latest = df.iloc[-1]
+            prev = df.iloc[-2]  # 이전 데이터
             
             ma_short = latest['ma_short']
             ma_long = latest['ma_long']
