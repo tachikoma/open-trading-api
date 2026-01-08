@@ -1,9 +1,0 @@
-{
-	"servers": {
-		"kis-code-assistant-mcp-server-f597c91a": {
-			"url": "https://smithery.ai/server/@KISOpenAPI/kis-code-assistant-mcp",
-			"type": "http"
-		}
-	},
-	"inputs": []
-}
