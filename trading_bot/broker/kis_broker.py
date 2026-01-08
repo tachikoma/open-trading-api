@@ -299,7 +299,8 @@ class KISBroker:
                 pdno=symbol,
                 ord_dvsn=order_type,
                 ord_qty=str(qty),
-                ord_unpr=str(price)
+                ord_unpr=str(price),
+                excg_id_dvsn_cd=Config.DEFAULT_EXCHANGE
             )
             
             self.logger.info(f"매수 주문 완료: {symbol}, 수량: {qty}, 가격: {price}")
@@ -335,7 +336,8 @@ class KISBroker:
                 pdno=symbol,
                 ord_dvsn=order_type,
                 ord_qty=str(qty),
-                ord_unpr=str(price)
+                ord_unpr=str(price),
+                excg_id_dvsn_cd=Config.DEFAULT_EXCHANGE
             )
             
             self.logger.info(f"매도 주문 완료: {symbol}, 수량: {qty}, 가격: {price}")
