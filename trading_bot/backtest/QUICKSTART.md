@@ -6,6 +6,19 @@
 
 ## 🚀 빠른 시작
 
+### 환경 변수 및 .env 파일
+
+- `trading_bot/config.py`는 시스템 환경변수와 프로젝트 루트의 `.env` 파일을 읽어 `ENV_MODE`와 `TRADING_ENABLED` 등을 초기화합니다. 우선순위는 시스템 환경변수 > `.env` > 코드 기본값입니다.
+- 백테스트 실행 시 `TRADING_ENABLED`가 `true`로 설정되어 있지 않은지(또는 `ENV_MODE`가 `real`인지) 확인하세요. 권장 설정은 아래와 같습니다:
+
+```
+ENV_MODE=demo
+TRADING_ENABLED=false
+```
+
+`.env.sample` 파일이 프로젝트 루트에 포함되어 있으니, 필요한 경우 이를 복사해 `.env`로 사용하세요.
+
+
 ### 1️⃣ FinanceDataReader로 백테스트 (권장)
 
 무료, 무제한 데이터로 장기 백테스트:

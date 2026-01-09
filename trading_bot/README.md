@@ -184,6 +184,27 @@ STOP_LOSS_PERCENT = 3.0      # 손절 비율 (%)
 TAKE_PROFIT_PERCENT = 5.0    # 익절 비율 (%)
 ```
 
+### 환경 변수 및 .env 파일
+
+- `trading_bot/config.py`는 시스템 환경변수와 프로젝트 루트의 `.env` 파일을 읽어 일부 설정을 초기화합니다. 우선순위는 시스템 환경변수 > `.env` > 코드 기본값입니다.
+- 주요 키:
+  - `ENV_MODE`: `real` 또는 `demo`
+  - `TRADING_ENABLED`: 실제 주문 활성화 여부 (`true`/`false`, `1`/`0`, `yes`/`no` 허용)
+
+- 파일 위치(프로젝트 루트):
+  - `./.env`  (실사용 파일 — 민감정보 포함 시 커밋 금지)
+  - `./.env.sample` (커밋 가능한 샘플 파일 — 저장소에 포함)
+
+예시 `.env` (프로젝트 루트에 생성):
+
+```
+ENV_MODE=demo
+TRADING_ENABLED=false
+```
+
+`.env.sample`을 복사하여 `.env`로 변경한 뒤 값을 환경에 맞게 수정하세요.
+
+
 ### 4. 실행 방법
 
 #### ⚠️ 중요: 이 프로젝트는 `uv` 기반입니다

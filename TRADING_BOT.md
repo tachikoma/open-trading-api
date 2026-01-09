@@ -201,6 +201,31 @@ trading_bot/config.py            # 봇 동작 설정
 ```
 - 감시 종목, 전략 파라미터, 실전/모의 모드 등 설정
 
+### 환경 변수 및 .env 파일
+
+- 프로젝트는 `trading_bot/config.py`에서 **프로젝트 루트에 위치한 `.env` 파일**과 시스템 환경변수를 읽어 설정을 초기화합니다.
+- 우선순위: 시스템 환경변수 > 프로젝트 루트의 `.env` > 코드 내 기본값
+
+- 사용 가능한 주요 키:
+   - `ENV_MODE`: "real" 또는 "demo" (실전/모의)
+   - `TRADING_ENABLED`: 실제 주문 활성화 여부 (`true`/`false`, `1`/`0`, `yes`/`no` 허용)
+
+- 파일 위치(프로젝트 루트):
+   - `./.env`  (실제 사용 파일 — 민감정보 포함 시 절대 커밋 금지)
+   - `./.env.sample` (커밋 가능한 샘플 파일 — 저장소에 포함되어 있습니다)
+
+- 예시 `.env` (프로젝트 루트에 생성):
+
+```
+ENV_MODE=demo
+TRADING_ENABLED=true
+```
+
+- `.env.sample` 파일을 복사하여 `.env`로 이름을 바꾼 후, 환경에 맞게 값을 수정하면 됩니다.
+- `TRADING_ENABLED`는 문자열 파싱으로 허용되는 값들을 처리하므로 `true/false`, `1/0`, `yes/no` 형태로 설정하세요.
+
+참고: `.env.sample`은 저장소에 커밋해도 안전한 예시 파일입니다. 실제 운영값(특히 API 키 등 민감정보)은 `.env`에 두고 커밋하지 마세요.
+
 ### 백테스트 결과
 ```
 trading_bot/backtest_results/    # 백테스트 결과 저장 (.gitignore)
