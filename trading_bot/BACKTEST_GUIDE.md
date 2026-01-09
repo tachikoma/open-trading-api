@@ -44,6 +44,22 @@ uv run run_backtest.py --source db --db-path backtest_data.db --start 20200101
 --long-period 20         # 장기 이동평균 (기본값: 20)
 ```
 
+### 환경 변수 및 .env 파일
+
+- `trading_bot/config.py`는 시스템 환경변수와 프로젝트 루트의 `.env` 파일을 읽어 일부 설정을 초기화합니다. 우선순위는 시스템 환경변수 > `.env` > 코드 기본값입니다.
+- 백테스트는 원칙적으로 실거래 주문을 발생시키지 않지만, 환경 설정(`ENV_MODE`, `TRADING_ENABLED`)은 `trading_bot/config.py`에서 불러오므로 로컬 실행 시 의도한 동작이 되도록 `.env` 또는 환경변수를 확인하세요.
+- 권장: 백테스트 실행 시 `TRADING_ENABLED`는 `false`로 설정하거나, 백테스트 전용 실행 스크립트를 사용하세요.
+
+예시 `.env` (프로젝트 루트):
+
+```
+ENV_MODE=demo
+TRADING_ENABLED=false
+```
+
+`.env.sample` 파일이 저장소 루트에 존재하므로 이를 복사해 `.env`로 사용하세요.
+
+
 ### 3. 결과 확인
 
 실행 후 다음 정보가 출력됩니다:

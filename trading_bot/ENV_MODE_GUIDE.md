@@ -59,6 +59,28 @@ ENV_MODE = "demo"
 # ENV_MODE = "real"
 ```
 
+### 환경 변수 및 .env 파일
+
+- `trading_bot/config.py`는 시스템 환경변수와 프로젝트 루트의 `.env` 파일을 읽어 설정을 초기화합니다.
+- 우선순위: 시스템 환경변수 > 프로젝트 루트의 `.env` > 코드 내 기본값
+- 주요 키:
+    - `ENV_MODE`: `real` 또는 `demo`
+    - `TRADING_ENABLED`: 실제 주문 활성화 여부 (`true`/`false`, `1`/`0`, `yes`/`no` 허용)
+
+- 파일 위치(프로젝트 루트):
+    - `./.env`  (실사용 파일 — 민감정보 포함 시 커밋 금지)
+    - `./.env.sample` (커밋 가능한 샘플 파일)
+
+예시 `.env`:
+
+```
+ENV_MODE=demo
+TRADING_ENABLED=false
+```
+
+`.env.sample`을 복사해서 `.env`로 이름을 바꾸고 환경에 맞게 수정하세요.
+
+
 ### 2. 기존 토큰 파일 삭제 (중요!)
 
 **⚠️ ENV_MODE를 변경할 때는 반드시 기존 토큰 파일을 삭제해야 합니다.**
