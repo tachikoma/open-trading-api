@@ -1,0 +1,9 @@
+{
+    "chat.mcp.serverSampling": {
+        "open-trading-api/.vscode/mcp.json: 한국투자 코딩도우미 MCP": {
+            "allowedModels": [
+                "copilot/gpt-5-mini"
+            ]
+        }
+    }
+}

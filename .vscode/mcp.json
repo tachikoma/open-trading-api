@@ -1,0 +1,9 @@
+{
+	"inputs": [],
+	"servers": {
+		"한국투자 코딩도우미 MCP": {
+			"type": "http",
+			"url": "https://server.smithery.ai/@KISOpenAPI/kis-code-assistant-mcp"
+		}
+	}
+}
