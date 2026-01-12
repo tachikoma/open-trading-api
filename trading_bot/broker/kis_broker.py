@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Optional, Dict, Any, Tuple
 import pandas as pd
 import time
+import os
 
 # 프로젝트 루트 경로 추가
 PROJECT_ROOT = Path(__file__).parent.parent.parent
@@ -60,7 +61,8 @@ class KISBroker:
             # real -> prod (실전투자 서버)
             # demo -> vps (모의투자 서버)
             svr = "prod" if self.env_mode == "real" else "vps"
-            
+            self._svr = svr
+
             # KIS 인증 수행 (토큰 자동 재발급)
             ka.auth(svr=svr)
             
@@ -122,6 +124,32 @@ class KISBroker:
                             continue
                         else:
                             raise
+                # 토큰 만료 감지시 자동 갱신 시도
+                msg = str(e)
+                if "EGW00123" in msg or "기간이 만료된 token" in msg or "token" in msg.lower() and "expire" in msg.lower():
+                    self.logger.warning(f"토큰 만료 응답 감지: {msg} (시도 {attempt}/{max_retries})")
+                    # 토큰 파일 삭제(존재 시) 및 재인증 시도
+                    try:
+                        token_path = getattr(ka, "token_tmp", None)
+                        if token_path and isinstance(token_path, str) and os.path.exists(token_path):
+                            os.remove(token_path)
+                            self.logger.info(f"로컬 토큰 파일 삭제: {token_path}")
+                    except Exception as rem_e:
+                        self.logger.warning(f"로컬 토큰 파일 삭제 실패: {rem_e}")
+
+                    # 재인증 시도
+                    try:
+                        svr = getattr(self, "_svr", ("prod" if self.env_mode == "real" else "vps"))
+                        ka.auth(svr=svr)
+                        self.logger.info("토큰 재발급 완료. 잠시 대기 후 재시도합니다.")
+                        time.sleep(delay_sec)
+                        if attempt < max_retries:
+                            continue
+                        else:
+                            raise
+                    except Exception as auth_e:
+                        self.logger.error(f"토큰 재발급 실패: {auth_e}")
+                        raise
 
                 # 기존 예외 메시지 기반 재시도 (rate limit)
                 msg = str(e)
