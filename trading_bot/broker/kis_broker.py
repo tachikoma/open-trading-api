@@ -10,15 +10,27 @@ from typing import Optional, Dict, Any, Tuple
 import pandas as pd
 import time
 import os
+import importlib.util
 
 # 프로젝트 루트 경로 추가
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
-sys.path.insert(0, str(PROJECT_ROOT / "examples_user"))
+# examples_user의 kis_auth.py를 우선 사용하도록 경로를 정렬합니다.
+# (예시 코드(examples_*)들이 동일한 모듈명을 사용하므로 import 우선순위를
+#  명시적으로 제어해야 합니다.)
 sys.path.insert(0, str(PROJECT_ROOT / "examples_llm"))
+sys.path.insert(0, str(PROJECT_ROOT / "examples_user"))
 
 # KIS 인증 및 함수들 import
-import kis_auth as ka
+# 예시 폴더(examples_user)와 exemples_llm에 동일한 모듈명이 있어 충돌할 수 있습니다.
+# 따라서 examples_user의 `kis_auth.py`를 명시적으로 로드하고 `sys.modules`에
+# 등록하여 이후 `import kis_auth` 호출이 올바른 모듈을 참조하도록 합니다.
+_kis_auth_path = PROJECT_ROOT / "examples_user" / "kis_auth.py"
+spec = importlib.util.spec_from_file_location("kis_auth", str(_kis_auth_path))
+ka = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(ka)
+sys.modules["kis_auth"] = ka
+
 from domestic_stock import domestic_stock_functions as dsf
 
 # trading_bot 모듈 import (절대 경로)
