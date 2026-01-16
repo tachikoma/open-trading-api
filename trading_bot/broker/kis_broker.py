@@ -36,6 +36,8 @@ from domestic_stock import domestic_stock_functions as dsf
 # trading_bot 모듈 import (절대 경로)
 from trading_bot.config import Config
 from trading_bot.utils.logger import setup_logger
+from trading_bot.utils.telegram import notify_order, send_telegram_message
+from trading_bot.utils.symbols import format_symbol
 
 
 class KISBroker:
@@ -421,9 +423,43 @@ class KISBroker:
             )
             
             self.logger.info(f"매수 주문 완료: {symbol}, 수량: {qty}, 가격: {price}")
-            return {"success": True, "data": result}
+            # 알림 전송 (성공)
+            try:
+                    # 시도: result에서 주문ID 추출
+                    order_id = None
+                    try:
+                        import pandas as _pd
+                        if isinstance(result, _pd.DataFrame) and not result.empty:
+                            for col in ("ord_no", "ordno", "odno", "orgn_odno", "order_no", "orderId", "order_id"):
+                                if col in result.columns:
+                                    v = result.iloc[0].get(col)
+                                    if v:
+                                        order_id = str(v)
+                                        break
+                    except Exception:
+                        pass
+                    if not order_id:
+                        try:
+                            if isinstance(result, dict):
+                                for k in ("order_no", "ord_no", "odno", "orgn_odno", "ordno", "orderId", "order_id"):
+                                    v = result.get(k)
+                                    if v:
+                                        order_id = str(v)
+                                        break
+                        except Exception:
+                            pass
+
+                    notify_order("BUY", symbol, qty, price, True, order_id=order_id)
+            except Exception:
+                pass
+                return {"success": True, "data": result, "order_id": order_id}
         except Exception as e:
             self.logger.error(f"매수 주문 실패 ({symbol}): {e}")
+            # 알림 전송 (실패)
+            try:
+                notify_order("BUY", symbol, qty, price, False, message=str(e))
+            except Exception:
+                pass
             return {"success": False, "message": str(e)}
     
     def sell(self, symbol: str, qty: int, price: int = 0, order_type: str = "00") -> Optional[Dict]:
@@ -459,9 +495,43 @@ class KISBroker:
             )
             
             self.logger.info(f"매도 주문 완료: {symbol}, 수량: {qty}, 가격: {price}")
-            return {"success": True, "data": result}
+            # 알림 전송 (성공)
+            try:
+                    # 시도: result에서 주문ID 추출
+                    order_id = None
+                    try:
+                        import pandas as _pd
+                        if isinstance(result, _pd.DataFrame) and not result.empty:
+                            for col in ("ord_no", "ordno", "odno", "orgn_odno", "order_no", "orderId", "order_id"):
+                                if col in result.columns:
+                                    v = result.iloc[0].get(col)
+                                    if v:
+                                        order_id = str(v)
+                                        break
+                    except Exception:
+                        pass
+                    if not order_id:
+                        try:
+                            if isinstance(result, dict):
+                                for k in ("order_no", "ord_no", "odno", "orgn_odno", "ordno", "orderId", "order_id"):
+                                    v = result.get(k)
+                                    if v:
+                                        order_id = str(v)
+                                        break
+                        except Exception:
+                            pass
+
+                    notify_order("SELL", symbol, qty, price, True, order_id=order_id)
+            except Exception:
+                pass
+                return {"success": True, "data": result, "order_id": order_id}
         except Exception as e:
             self.logger.error(f"매도 주문 실패 ({symbol}): {e}")
+            # 알림 전송 (실패)
+            try:
+                notify_order("SELL", symbol, qty, price, False, message=str(e))
+            except Exception:
+                pass
             return {"success": False, "message": str(e)}
     
     def cancel_order(self, order_no: str, qty: int, symbol: str, order_type: str) -> Optional[Dict]:

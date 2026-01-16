@@ -90,6 +90,26 @@ class Config:
     LOG_DIR = Path(__file__).parent / "logs"
     LOG_LEVEL = "INFO"  # DEBUG, INFO, WARNING, ERROR
 
+    # 심볼 매핑 설정
+    _raw_symbol_enabled = os.environ.get("SYMBOL_MAP_ENABLED", _env_vals.get("SYMBOL_MAP_ENABLED", "1"))
+    if isinstance(_raw_symbol_enabled, bool):
+        SYMBOL_MAP_ENABLED = _raw_symbol_enabled
+    else:
+        SYMBOL_MAP_ENABLED = str(_raw_symbol_enabled).strip().lower() in ("1", "true", "yes", "on")
+
+    SYMBOL_MAP_DIR = os.environ.get("SYMBOL_MAP_DIR", _env_vals.get("SYMBOL_MAP_DIR", str(Path(__file__).parent / "data")))
+
+    # Telegram 알림 설정
+    _raw_tele_enabled = os.environ.get("TELEGRAM_ENABLED", _env_vals.get("TELEGRAM_ENABLED", "0"))
+    if isinstance(_raw_tele_enabled, bool):
+        TELEGRAM_ENABLED = _raw_tele_enabled
+    else:
+        TELEGRAM_ENABLED = str(_raw_tele_enabled).strip().lower() in ("1", "true", "yes", "on")
+
+    TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", _env_vals.get("TELEGRAM_BOT_TOKEN", ""))
+    TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", _env_vals.get("TELEGRAM_CHAT_ID", ""))
+    TELEGRAM_TIMEOUT_SEC = int(os.environ.get("TELEGRAM_TIMEOUT_SEC", _env_vals.get("TELEGRAM_TIMEOUT_SEC", "3")))
+
     # 전략 설정
     STRATEGIES_ENABLED = ["ma_crossover"]  # 활성화할 전략 목록
 

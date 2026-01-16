@@ -9,6 +9,7 @@ from typing import Optional
 from trading_bot.strategies.base_strategy import BaseStrategy
 from trading_bot.broker import KISBroker
 from trading_bot.config import Config
+from trading_bot.utils.symbols import format_symbol
 
 
 class MovingAverageCrossover(BaseStrategy):
@@ -54,7 +55,7 @@ class MovingAverageCrossover(BaseStrategy):
         
         if data is None or len(data) < self.long_period:
             if debug:
-                self.logger.debug(f"[{symbol}] 데이터 부족: {len(data) if data is not None else 0}/{self.long_period}")
+                self.logger.debug(f"[{format_symbol(symbol)}] 데이터 부족: {len(data) if data is not None else 0}/{self.long_period}")
             return None
         
         # 가격 데이터 추출
@@ -99,7 +100,7 @@ class MovingAverageCrossover(BaseStrategy):
                 'debug': debug_info
             }
             if debug:
-                self.logger.info(f"[{symbol}] {result['reason']}")
+                self.logger.info(f"[{format_symbol(symbol)}] {result['reason']}")
             return result
         
         # 데드크로스 감지 (이전: 단기 >= 장기, 현재: 단기 < 장기)
@@ -110,13 +111,13 @@ class MovingAverageCrossover(BaseStrategy):
                 'debug': debug_info
             }
             if debug:
-                self.logger.info(f"[{symbol}] {result['reason']}")
+                self.logger.info(f"[{format_symbol(symbol)}] {result['reason']}")
             return result
         
         # 시그널 없음
         if debug:
             status = "상승세" if current_short > current_long else "하락세"
-            self.logger.debug(f"[{symbol}] 시그널 없음 - {status} (단기: {current_short:.0f}, 장기: {current_long:.0f})")
+            self.logger.debug(f"[{format_symbol(symbol)}] 시그널 없음 - {status} (단기: {current_short:.0f}, 장기: {current_long:.0f})")
         
         return None
     
@@ -143,7 +144,7 @@ class MovingAverageCrossover(BaseStrategy):
 
             # 3) 여전히 데이터가 없으면 경고
             if df is None or (hasattr(df, 'empty') and df.empty):
-                self.logger.warning(f"[{symbol}] 시세 데이터 없음")
+                self.logger.warning(f"[{format_symbol(symbol)}] 시세 데이터 없음")
                 return None
 
             # 4) 종가 컬럼 식별 (여러 API 반환 형식에 대응)
@@ -170,7 +171,7 @@ class MovingAverageCrossover(BaseStrategy):
                         break
 
             if close_col is None:
-                self.logger.error(f"[{symbol}] 종가 컬럼 없음: columns={list(df.columns)}")
+                self.logger.error(f"[{format_symbol(symbol)}] 종가 컬럼 없음: columns={list(df.columns)}")
                 return None
 
             # 종가를 숫자로 변환
@@ -195,7 +196,7 @@ class MovingAverageCrossover(BaseStrategy):
             # 충분한 데이터가 있어야 최신값과 이전값의 MA가 계산된다
             # rolling(window=N) 첫 유효값은 index N-1 -> 최신과 이전값 둘 다 존재하려면 N+1개 이상
             if len(df) < (self.long_period + 1):
-                self.logger.warning(f"[{symbol}] 이동평균 계산에 필요한 데이터 부족 ({len(df)}/{self.long_period + 1})")
+                self.logger.warning(f"[{format_symbol(symbol)}] 이동평균 계산에 필요한 데이터 부족 ({len(df)}/{self.long_period + 1})")
                 return None
 
             latest = df.iloc[-1]
@@ -208,13 +209,13 @@ class MovingAverageCrossover(BaseStrategy):
             prev_ma_long = prev['ma_long']
 
             if pd.isna(ma_short) or pd.isna(ma_long) or pd.isna(prev_ma_short) or pd.isna(prev_ma_long):
-                self.logger.warning(f"[{symbol}] 이동평균 계산 불가 (데이터 부족)")
+                self.logger.warning(f"[{format_symbol(symbol)}] 이동평균 계산 불가 (데이터 부족)")
                 return None
 
             return ma_short, ma_long, current_price, prev_ma_short, prev_ma_long
 
         except Exception as e:
-            self.logger.error(f"[{symbol}] 이동평균 계산 중 오류: {e}")
+            self.logger.error(f"[{format_symbol(symbol)}] 이동평균 계산 중 오류: {e}")
             return None
     
     def get_signal(self, symbol: str) -> Optional[str]:
@@ -286,7 +287,7 @@ class MovingAverageCrossover(BaseStrategy):
                     self._execute_sell(symbol)
                 
             except Exception as e:
-                self.logger.error(f"[{symbol}] 전략 실행 중 오류: {e}")
+                self.logger.error(f"[{format_symbol(symbol)}] 전략 실행 중 오류: {e}")
         
         self.logger.info("전략 실행 완료")
     
@@ -301,7 +302,7 @@ class MovingAverageCrossover(BaseStrategy):
             # 현재가 조회
             price_df = self.broker.get_current_price(symbol)
             if price_df is None or price_df.empty:
-                self.logger.warning(f"[{symbol}] 현재가 조회 실패")
+                self.logger.warning(f"[{format_symbol(symbol)}] 현재가 조회 실패")
                 return
             
             current_price = int(price_df.iloc[0]['stck_prpr'])
@@ -309,7 +310,7 @@ class MovingAverageCrossover(BaseStrategy):
             # 매수가능 금액 조회 (종목 및 현재가 기준)
             available_cash = self.broker.get_buyable_cash(symbol, current_price)
             if available_cash is None or available_cash == 0:
-                self.logger.warning(f"[{symbol}] 매수 가능 금액 없음")
+                self.logger.warning(f"[{format_symbol(symbol)}] 매수 가능 금액 없음")
                 return
             
             # 포지션 크기 계산 (설정된 최대 금액과 가용 현금 중 작은 값)
@@ -319,20 +320,20 @@ class MovingAverageCrossover(BaseStrategy):
             qty = invest_amount // current_price
             
             if qty == 0:
-                self.logger.warning(f"[{symbol}] 매수 수량 0 (금액 부족)")
+                self.logger.warning(f"[{format_symbol(symbol)}] 매수 수량 0 (금액 부족)")
                 return
             
             # 매수 주문
-            self.logger.info(f"[{symbol}] 매수 시도: 가격={current_price}, 수량={qty}")
+            self.logger.info(f"[{format_symbol(symbol)}] 매수 시도: 가격={current_price}, 수량={qty}")
             result = self.broker.buy(symbol, qty, current_price, order_type="00")
             
             if result and result.get('success'):
-                self.logger.info(f"[{symbol}] 매수 성공")
+                self.logger.info(f"[{format_symbol(symbol)}] 매수 성공")
             else:
-                self.logger.error(f"[{symbol}] 매수 실패: {result.get('message')}")
-                
+                self.logger.error(f"[{format_symbol(symbol)}] 매수 실패: {result.get('message')}")
+
         except Exception as e:
-            self.logger.error(f"[{symbol}] 매수 실행 중 오류: {e}")
+            self.logger.error(f"[{format_symbol(symbol)}] 매수 실행 중 오류: {e}")
     
     def _execute_sell(self, symbol: str):
         """
@@ -346,38 +347,38 @@ class MovingAverageCrossover(BaseStrategy):
             holdings_df, _ = self.broker.get_balance()
             
             if holdings_df is None or holdings_df.empty:
-                self.logger.info(f"[{symbol}] 보유 종목 없음")
+                self.logger.info(f"[{format_symbol(symbol)}] 보유 종목 없음")
                 return
             
             # 해당 종목 보유 확인
             holding = holdings_df[holdings_df['pdno'] == symbol]
             
             if holding.empty:
-                self.logger.info(f"[{symbol}] 보유하지 않은 종목")
+                self.logger.info(f"[{format_symbol(symbol)}] 보유하지 않은 종목")
                 return
             
             qty = int(holding.iloc[0]['hldg_qty'])
             
             if qty == 0:
-                self.logger.info(f"[{symbol}] 보유 수량 0")
+                self.logger.info(f"[{format_symbol(symbol)}] 보유 수량 0")
                 return
             
             # 현재가 조회
             price_df = self.broker.get_current_price(symbol)
             if price_df is None or price_df.empty:
-                self.logger.warning(f"[{symbol}] 현재가 조회 실패")
+                self.logger.warning(f"[{format_symbol(symbol)}] 현재가 조회 실패")
                 return
             
             current_price = int(price_df.iloc[0]['stck_prpr'])
             
             # 매도 주문
-            self.logger.info(f"[{symbol}] 매도 시도: 가격={current_price}, 수량={qty}")
+            self.logger.info(f"[{format_symbol(symbol)}] 매도 시도: 가격={current_price}, 수량={qty}")
             result = self.broker.sell(symbol, qty, current_price, order_type="00")
             
             if result and result.get('success'):
-                self.logger.info(f"[{symbol}] 매도 성공")
+                self.logger.info(f"[{format_symbol(symbol)}] 매도 성공")
             else:
-                self.logger.error(f"[{symbol}] 매도 실패: {result.get('message')}")
+                self.logger.error(f"[{format_symbol(symbol)}] 매도 실패: {result.get('message')}")
                 
         except Exception as e:
-            self.logger.error(f"[{symbol}] 매도 실행 중 오류: {e}")
+            self.logger.error(f"[{format_symbol(symbol)}] 매도 실행 중 오류: {e}")
