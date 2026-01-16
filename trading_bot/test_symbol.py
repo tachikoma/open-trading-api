@@ -1,3 +1,31 @@
+import sys
+from pathlib import Path
+
+# Ensure project root is on sys.path so `trading_bot` package can be imported
+PROJECT_ROOT = Path(__file__).parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+
+from trading_bot.utils.symbols import format_symbol, load_symbol_map
+
+
+def test_format_with_csv():
+    # Ensure the default data dir exists and contains the example CSVs
+    data_dir = Path(__file__).parent / "data"
+    m = load_symbol_map(str(data_dir))
+    # example symbol from template
+    print(format_symbol("005930", str(data_dir)))  # expect 삼성전자(005930)
+
+
+def test_format_without_csv():
+    # Load from an empty temp dir to trigger fallback (may return original symbol)
+    import tempfile
+    with tempfile.TemporaryDirectory() as td:
+        print(format_symbol("005930", td))
+
+
+if __name__ == "__main__":
+    test_format_with_csv()
+    test_format_without_csv()
 #!/usr/bin/env python3
 """
 Simple live test: query MA and signal for a single symbol using KIS API
