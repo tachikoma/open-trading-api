@@ -176,3 +176,7 @@ backtester/examples/output/*.py
 settings.local.json
 
 .serena/
+# 백테스트 DB (외부 생성)
+trading_bot/backtest_data.db
+.DS_Store
+logs/

@@ -10,6 +10,10 @@
 import os
 from pathlib import Path
 from typing import Optional
+from dotenv import load_dotenv, find_dotenv
+
+# load .env from repository root (if present)
+load_dotenv(find_dotenv())
 
 
 def _parse_env_file(path: Path) -> dict:
@@ -89,6 +93,18 @@ class Config:
     # 로깅 설정
     LOG_DIR = Path(__file__).parent / "logs"
     LOG_LEVEL = "INFO"  # DEBUG, INFO, WARNING, ERROR
+    # 로그 파일명 (통합 로그)
+    LOG_FILE = Path(os.environ.get("LOG_FILE", _env_vals.get("LOG_FILE", str(LOG_DIR / "app.log"))))
+    # 로테이션 설정 (.env 또는 환경변수로 오버라이드 가능)
+    try:
+        LOG_MAX_BYTES = int(os.environ.get("LOG_MAX_BYTES", _env_vals.get("LOG_MAX_BYTES", str(10 * 1024 * 1024))))
+    except Exception:
+        LOG_MAX_BYTES = 10 * 1024 * 1024
+
+    try:
+        LOG_BACKUP_COUNT = int(os.environ.get("LOG_BACKUP_COUNT", _env_vals.get("LOG_BACKUP_COUNT", str(10))))
+    except Exception:
+        LOG_BACKUP_COUNT = 10
 
     # 심볼 매핑 설정
     _raw_symbol_enabled = os.environ.get("SYMBOL_MAP_ENABLED", _env_vals.get("SYMBOL_MAP_ENABLED", "1"))
