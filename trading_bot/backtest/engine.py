@@ -16,7 +16,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from trading_bot.broker.kis_broker import KISBroker
 from trading_bot.strategies.base_strategy import BaseStrategy
 from trading_bot.backtest.metrics import PerformanceMetrics
-from trading_bot.utils.logger import setup_logger
+from trading_bot.utils.logger import setup_logger, setup_legacy_logger
 from trading_bot.config import Config
 
 
@@ -41,7 +41,8 @@ class BacktestEngine:
         self.commission_rate = commission_rate
         self.slippage_rate = slippage_rate
         
-        self.logger = setup_logger("Backtest", Config.LOG_DIR, Config.LOG_LEVEL)
+        # 백테스트는 기존 동작을 유지하기 위해 일별 로그 파일을 사용
+        self.logger = setup_legacy_logger("Backtest", Config.LOG_DIR, Config.LOG_LEVEL)
         
         # 백테스트 상태
         self.cash = initial_capital

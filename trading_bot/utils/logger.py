@@ -4,8 +4,10 @@
 import logging
 import sys
 from pathlib import Path
-from datetime import datetime
-import pytz
+from logging.handlers import RotatingFileHandler
+from typing import Union
+
+from trading_bot.config import Config
 
 
 def setup_logger(name: str, log_dir: Path, level: str = "INFO"):
@@ -22,28 +24,99 @@ def setup_logger(name: str, log_dir: Path, level: str = "INFO"):
     """
     logger = logging.getLogger(name)
     logger.setLevel(getattr(logging, level))
-    
+
+    # 포맷 설정 (공통)
+    formatter = logging.Formatter(
+        "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+
+    # --- 루트에 단일 RotatingFileHandler 추가 (중복 추가 방지) ---
+    root_logger = logging.getLogger()
+    root_logger.setLevel(getattr(logging, level))
+
+    # Ensure log directory exists
+    log_file_path: Path
+    if isinstance(Config.LOG_FILE, (str, Path)):
+        log_file_path = Path(Config.LOG_FILE)
+    else:
+        log_file_path = Path(str(Config.LOG_DIR / "app.log"))
+
+    log_file_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Check existing RotatingFileHandler for same filename
+    has_rotating = False
+    for h in root_logger.handlers:
+        if isinstance(h, RotatingFileHandler) and getattr(h, "baseFilename", None) == str(log_file_path):
+            has_rotating = True
+            break
+
+    if not has_rotating:
+        rotating_handler = RotatingFileHandler(
+            filename=str(log_file_path),
+            maxBytes=int(Config.LOG_MAX_BYTES),
+            backupCount=int(Config.LOG_BACKUP_COUNT),
+            encoding="utf-8",
+        )
+        rotating_handler.setFormatter(formatter)
+        root_logger.addHandler(rotating_handler)
+
+    # --- 모듈별 로거 설정: 콘솔 출력만 추가하고 파일은 루트 핸들러로 전파 ---
+    # Remove any FileHandler attached directly to the module logger to avoid duplicate files
+    for h in list(logger.handlers):
+        if isinstance(h, logging.FileHandler):
+            logger.removeHandler(h)
+
+    # Add console handler if not present
+    if not any(isinstance(h, logging.StreamHandler) for h in logger.handlers):
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setFormatter(formatter)
+        logger.addHandler(console_handler)
+
+    # Let messages bubble up to root (where rotating file handler lives)
+    logger.propagate = True
+
+    return logger
+
+
+def setup_legacy_logger(name: str, log_dir: Path, level: str = "INFO"):
+    """
+    기존 동작(일별 로그 파일)을 사용하는 레거시 로거 설정.
+
+    - 모듈별로 날짜를 붙인 파일을 생성합니다: `{name}_{YYYYMMDD}.log`
+    - 주로 백테스트나 독립 실행 스크립트에서 사용합니다.
+    """
+    logger = logging.getLogger(name)
+    logger.setLevel(getattr(logging, level))
+
     # 기존 핸들러 제거
     logger.handlers.clear()
-    
+
     # 포맷 설정
     formatter = logging.Formatter(
-        '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
+        "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
     )
-    
+
     # 콘솔 핸들러
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setFormatter(formatter)
-    logger.addHandler(console_handler)
-    
+    if not any(isinstance(h, logging.StreamHandler) for h in logger.handlers):
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setFormatter(formatter)
+        logger.addHandler(console_handler)
+
     # 파일 핸들러 (일별 로그)
     log_dir.mkdir(parents=True, exist_ok=True)
-    kst = pytz.timezone('Asia/Seoul')
+    from datetime import datetime
+    import pytz
+
+    kst = pytz.timezone("Asia/Seoul")
     now_kst = datetime.now(kst)
     log_file = log_dir / f"{name}_{now_kst.strftime('%Y%m%d')}.log"
-    file_handler = logging.FileHandler(log_file, encoding='utf-8')
+    file_handler = logging.FileHandler(log_file, encoding="utf-8")
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
-    
+
+    # 파일 핸들러를 사용하므로 전파를 비활성화
+    logger.propagate = False
+
     return logger
