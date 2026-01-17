@@ -2,6 +2,7 @@ from pathlib import Path
 import csv
 import os
 from typing import Dict
+from trading_bot.config import Config
 
 # Module-level cache
 _SYMBOL_MAP: Dict[str, str] = {}
@@ -26,7 +27,14 @@ def load_symbol_map(dir_path: str = None) -> Dict[str, str]:
 
     _SYMBOL_MAP = {}
 
-    data_dir = Path(dir_path) if dir_path else _default_data_dir()
+    # If caller provides dir_path, use it. Otherwise default to Config.SYMBOL_MAP_DIR
+    if dir_path:
+        data_dir = Path(dir_path)
+    else:
+        try:
+            data_dir = Path(Config.SYMBOL_MAP_DIR)
+        except Exception:
+            data_dir = _default_data_dir()
 
     # CSV-first: look for files named symbols_*.csv
     try:
@@ -87,18 +95,25 @@ def load_symbol_map(dir_path: str = None) -> Dict[str, str]:
     return _SYMBOL_MAP
 
 
-def get_symbol_name(symbol: str, dir_path: str = None) -> str:
-    """Return the mapped name for symbol, or empty string if not found."""
+def get_symbol_name(symbol: str) -> str:
+    """Return the mapped name for symbol, or empty string if not found.
+
+    This uses the configured `Config.SYMBOL_MAP_DIR` (or repository default)
+    and does not accept a directory argument so existing call sites stay unchanged.
+    """
     if not symbol:
         return ""
-    load_symbol_map(dir_path)
+    load_symbol_map()
     key = symbol.strip()
     return _SYMBOL_MAP.get(key, "")
 
 
-def format_symbol(symbol: str, dir_path: str = None) -> str:
-    """Return '이름(종목코드)' if name exists, else original symbol."""
-    name = get_symbol_name(symbol, dir_path)
+def format_symbol(symbol: str) -> str:
+    """Return '이름(종목코드)' if name exists, else original symbol.
+
+    Uses `get_symbol_name()` (which relies on `Config.SYMBOL_MAP_DIR`).
+    """
+    name = get_symbol_name(symbol)
     if name:
         return f"{name}({symbol})"
     return symbol
