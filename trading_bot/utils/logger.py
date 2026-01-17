@@ -61,14 +61,32 @@ def setup_logger(name: str, log_dir: Path, level: str = "INFO"):
         rotating_handler.setFormatter(formatter)
         root_logger.addHandler(rotating_handler)
 
+    # Remove duplicate RotatingFileHandler entries pointing to same file (safety)
+    seen_files = set()
+    for h in list(root_logger.handlers):
+        if isinstance(h, RotatingFileHandler):
+            fname = getattr(h, "baseFilename", None)
+            if fname in seen_files:
+                root_logger.removeHandler(h)
+            else:
+                seen_files.add(fname)
+
     # --- 모듈별 로거 설정: 콘솔 출력만 추가하고 파일은 루트 핸들러로 전파 ---
     # Remove any FileHandler attached directly to the module logger to avoid duplicate files
     for h in list(logger.handlers):
         if isinstance(h, logging.FileHandler):
             logger.removeHandler(h)
 
-    # Add console handler if not present
-    if not any(isinstance(h, logging.StreamHandler) for h in logger.handlers):
+    # Ensure only one console handler (stream=sys.stdout)
+    seen_console = False
+    for h in list(logger.handlers):
+        if isinstance(h, logging.StreamHandler) and getattr(h, "stream", None) is sys.stdout:
+            if seen_console:
+                logger.removeHandler(h)   # 중복된 핸들러 제거
+            else:
+                seen_console = True
+
+    if not seen_console:
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setFormatter(formatter)
         logger.addHandler(console_handler)
@@ -98,8 +116,16 @@ def setup_legacy_logger(name: str, log_dir: Path, level: str = "INFO"):
         datefmt="%Y-%m-%d %H:%M:%S",
     )
 
-    # 콘솔 핸들러
-    if not any(isinstance(h, logging.StreamHandler) for h in logger.handlers):
+    # 콘솔 핸들러: 중복 StreamHandler(sys.stdout)가 여러 개 붙지 않도록 정리
+    seen_console = False
+    for h in list(logger.handlers):
+        if isinstance(h, logging.StreamHandler) and getattr(h, "stream", None) is sys.stdout:
+            if seen_console:
+                logger.removeHandler(h)
+            else:
+                seen_console = True
+
+    if not seen_console:
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setFormatter(formatter)
         logger.addHandler(console_handler)
