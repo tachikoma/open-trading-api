@@ -92,7 +92,8 @@ class Config:
 
     # 로깅 설정
     LOG_DIR = Path(__file__).parent / "logs"
-    LOG_LEVEL = "INFO"  # DEBUG, INFO, WARNING, ERROR
+    # LOG_LEVEL: 환경변수 > .env > 기본값
+    LOG_LEVEL = os.environ.get("LOG_LEVEL", _env_vals.get("LOG_LEVEL", "INFO")).upper()  # DEBUG, INFO, WARNING, ERROR
     # 로그 파일명 (통합 로그)
     LOG_FILE = Path(os.environ.get("LOG_FILE", _env_vals.get("LOG_FILE", str(LOG_DIR / "app.log"))))
     # 로테이션 설정 (.env 또는 환경변수로 오버라이드 가능)
