@@ -4,7 +4,7 @@ set -euo pipefail
 # 공통 재시작 스크립트 함수들
 # 이 파일은 각 전용 스크립트에서 source하여 사용
 
-# 전역 변수: NAME, WORKDIR, CMD_STR, PID_FILE, LOG_DIR, LOG_FILE
+# 전역 변수: NAME, WORKDIR, CMD_STR, PID_FILE, LOG_DIR
 # 각 스크립트에서 설정 후 source
 
 stop_existing() {
@@ -44,11 +44,18 @@ stop_existing() {
 }
 
 start_new() {
-  printf "작업디렉토리: %s\n명령: %s\n로그: %s\n" "$WORKDIR" "$CMD_STR" "$LOG_FILE"
+  # nohup 전용 로그 파일을 분리하여 동일 파일에 중복 기록되는 문제 방지
+  # NAME 변수가 설정되어 있으면 이를 사용, 없으면 'app'을 기본값으로 사용
+  NOHUP_LOG="$LOG_DIR/${NAME:-app}_nohup.log"
+  
+  printf "작업디렉토리: %s\n명령: %s\n로그: %s\n" "$WORKDIR" "$CMD_STR" "$NOHUP_LOG"
   cd "$WORKDIR" || { echo "WORKDIR 없음: $WORKDIR" >&2; exit 1; }
+  
+  # 로그 디렉터리 보장
+  mkdir -p "$LOG_DIR"
 
-  # nohup으로 실행
-  nohup bash -lc "$CMD_STR" >> "$LOG_FILE" 2>&1 &
+  # nohup으로 실행 (nohup 출력은 NOHUP_LOG로, 애플리케이션 자체 로그는 그대로 유지)
+  nohup bash -lc "$CMD_STR" >> "$NOHUP_LOG" 2>&1 &
   NEW_PID=$!
   echo "$NEW_PID" > "$PID_FILE"
   disown "$NEW_PID" 2>/dev/null || true

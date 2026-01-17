@@ -30,10 +30,8 @@ done
 
 PID_FILE="$HOME/.${NAME}.pid"
 LOG_DIR="${WORKDIR}/logs"
-LOG_FILE="${LOG_DIR}/${NAME}.log"
 
 mkdir -p "$LOG_DIR"
-touch "$LOG_FILE"
 
 # expand ~ in WORKDIR
 WORKDIR="${WORKDIR/#\~/$HOME}"
