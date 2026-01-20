@@ -38,6 +38,7 @@ from trading_bot.config import Config
 from trading_bot.utils.logger import setup_logger
 from trading_bot.utils.telegram import notify_order, send_telegram_message
 from trading_bot.utils.symbols import format_symbol
+from trading_bot.broker.auth_utils import is_token_expired_response, refresh_token, TokenRefreshError
 
 
 class KISBroker:
@@ -104,6 +105,27 @@ class KISBroker:
             try:
                 result = func(*args, **kwargs)
 
+                # 결과 기반 토큰 만료 검사: API가 HTTP 200으로 응답하면서
+                # body에 만료 코드(EGW00123 등)를 담아오는 경우를 감지
+                try:
+                    if is_token_expired_response(result):
+                        self.logger.warning(f"토큰 만료 응답 감지(결과 기반). (시도 {attempt}/{max_retries})")
+                        svr = getattr(self, "_svr", ("prod" if self.env_mode == "real" else "vps"))
+                        try:
+                            refresh_token(ka, svr, self.logger, delay_sec=delay_sec)
+                            if attempt < max_retries:
+                                continue
+                            else:
+                                raise TokenRefreshError("토큰 재발급 후에도 실패")
+                        except TokenRefreshError:
+                            raise
+                        except Exception as auth_e:
+                            self.logger.error(f"토큰 재발급 실패(결과 기반): {auth_e}")
+                            raise TokenRefreshError(str(auth_e))
+                except Exception:
+                    # 헬퍼 내부 오류는 무시하고 정상 흐름 유지
+                    pass
+
                 # 결과 기반 재시도 판단 콜백이 제공된 경우 호출
                 if callable(check_result):
                     try:
@@ -138,32 +160,25 @@ class KISBroker:
                             continue
                         else:
                             raise
-                # 토큰 만료 감지시 자동 갱신 시도
-                msg = str(e)
-                if "EGW00123" in msg or "기간이 만료된 token" in msg or "token" in msg.lower() and "expire" in msg.lower():
-                    self.logger.warning(f"토큰 만료 응답 감지: {msg} (시도 {attempt}/{max_retries})")
-                    # 토큰 파일 삭제(존재 시) 및 재인증 시도
-                    try:
-                        token_path = getattr(ka, "token_tmp", None)
-                        if token_path and isinstance(token_path, str) and os.path.exists(token_path):
-                            os.remove(token_path)
-                            self.logger.info(f"로컬 토큰 파일 삭제: {token_path}")
-                    except Exception as rem_e:
-                        self.logger.warning(f"로컬 토큰 파일 삭제 실패: {rem_e}")
-
-                    # 재인증 시도
-                    try:
+                # 토큰 만료 감지시 자동 갱신 시도 (중앙 헬퍼 사용)
+                try:
+                    if is_token_expired_response(e):
+                        self.logger.warning(f"토큰 만료 응답 감지: {e} (시도 {attempt}/{max_retries})")
                         svr = getattr(self, "_svr", ("prod" if self.env_mode == "real" else "vps"))
-                        ka.auth(svr=svr)
-                        self.logger.info("토큰 재발급 완료. 잠시 대기 후 재시도합니다.")
-                        time.sleep(delay_sec)
-                        if attempt < max_retries:
-                            continue
-                        else:
+                        try:
+                            refresh_token(ka, svr, self.logger, delay_sec=delay_sec)
+                            if attempt < max_retries:
+                                continue
+                            else:
+                                raise TokenRefreshError("토큰 재발급 후에도 실패")
+                        except TokenRefreshError:
                             raise
-                    except Exception as auth_e:
-                        self.logger.error(f"토큰 재발급 실패: {auth_e}")
-                        raise
+                        except Exception as auth_e:
+                            self.logger.error(f"토큰 재발급 실패: {auth_e}")
+                            raise TokenRefreshError(str(auth_e))
+                except Exception:
+                    # 헬퍼 내부 오류는 무시하고 기존 흐름으로 진행
+                    pass
 
                 # 기존 예외 메시지 기반 재시도 (rate limit)
                 msg = str(e)
@@ -221,6 +236,8 @@ class KISBroker:
             return not has_any
 
         return False
+    
+    pass
     
     # ==================== 시세 조회 ====================
     
