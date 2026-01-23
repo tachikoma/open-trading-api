@@ -103,6 +103,23 @@ class KISBroker:
         """
         for attempt in range(1, max_retries + 1):
             try:
+                # 사전 토큰 검사: 토큰 파일/내용이 만료되었는지 확인하고
+                # 필요 시 재발급을 시도합니다. (500 에러로 토큰 만료를 감지하지 못하는 경우 대비)
+                try:
+                    svr = getattr(self, "_svr", ("prod" if self.env_mode == "real" else "vps"))
+                    if callable(getattr(ka, "read_token", None)):
+                        current_token = ka.read_token()
+                        if current_token is None:
+                            self.logger.info(f"사전 토큰 만료 감지: 로컬 토큰 없음/만료. 재발급 시도 (서버: {svr})")
+                            try:
+                                refresh_token(ka, svr, self.logger, delay_sec=delay_sec)
+                            except TokenRefreshError as tr_e:
+                                self.logger.error(f"사전 토큰 재발급 실패: {tr_e}")
+                                raise
+                except Exception as pre_e:
+                    # 토큰 검사/재발급 중 문제 발생해도 호출 시도를 계속 진행하도록 경고만 로깅
+                    self.logger.warning(f"사전 토큰 검사/재발급 중 오류: {pre_e}")
+
                 result = func(*args, **kwargs)
 
                 # 결과 기반 토큰 만료 검사: API가 HTTP 200으로 응답하면서
@@ -136,6 +153,11 @@ class KISBroker:
 
                     if should_retry:
                         self.logger.warning(f"check_result 요청으로 재시도합니다. (시도 {attempt}/{max_retries})")
+                        try:
+                            # 결과가 있을 경우 가능한 상세 응답/헤더를 추출해 로깅
+                            self._log_response_details(result, f"check_result 재시도 (시도 {attempt}/{max_retries})")
+                        except Exception as _e:
+                            self.logger.debug(f"상세 응답 로깅 중 오류: {_e}")
                         if attempt < max_retries:
                             time.sleep(delay_sec)
                             continue
@@ -155,6 +177,11 @@ class KISBroker:
 
                     if should_retry:
                         self.logger.warning(f"check_result 요청으로 예외에서 재시도합니다: {e} (시도 {attempt}/{max_retries})")
+                        try:
+                            # 예외가 포함하는 응답 객체가 있으면 상세 로깅
+                            self._log_response_details(e, f"check_result 예외 재시도 (시도 {attempt}/{max_retries})")
+                        except Exception as _e:
+                            self.logger.debug(f"상세 예외 로깅 중 오류: {_e}")
                         if attempt < max_retries:
                             time.sleep(delay_sec)
                             continue
@@ -185,11 +212,125 @@ class KISBroker:
                 if "EGW00201" in msg or "초당 거래건수" in msg or "초당 거래건수를 초과" in msg:
                     self.logger.warning(f"API rate limit 응답 감지: {msg} (시도 {attempt}/{max_retries}). 재시도합니다.")
                     if attempt < max_retries:
+                        try:
+                            self._log_response_details(e, f"rate-limit 예외 재시도 (시도 {attempt}/{max_retries})")
+                        except Exception:
+                            pass
                         time.sleep(delay_sec)
                         continue
 
-                # 재시도 대상이 아니거나 마지막 시도인 경우 예외 재발생
+                # 재시도 대상이 아니거나 마지막 시도인 경우, 가능하면 상세 응답을 로그에 남기고 예외 재발생
+                try:
+                    self._log_response_details(e, f"최종 예외 (시도 {attempt}/{max_retries})")
+                except Exception:
+                    pass
                 raise
+
+    def _log_response_details(self, obj, context: str = "response"):
+        """안전하게 다양한 응답/예외 객체에서 헤더와 본문을 추출해 로그로 남깁니다.
+
+        - `obj`는 requests.Response, 예외(HTTPError), examples_user의 APIResp, dict, pandas.DataFrame 등 다양할 수 있음.
+        - 본문은 길이 제한(1000자)으로 잘라서 로깅합니다.
+        """
+        try:
+            # None 무시
+            if obj is None:
+                self.logger.debug(f"{context}: no response object")
+                return
+
+            # examples_user의 APIResp 타입(유사 객체)
+            if hasattr(obj, "getHeader") and hasattr(obj, "getBody"):
+                try:
+                    hdr = obj.getHeader()
+                    body = obj.getBody()
+                    hdr_items = {}
+                    try:
+                        hdr_items = {f: getattr(hdr, f) for f in getattr(hdr, "_fields", [])}
+                    except Exception:
+                        hdr_items = {f: getattr(hdr, f, None) for f in getattr(hdr, "_fields", [])}
+                    body_items = {}
+                    try:
+                        body_items = {f: getattr(body, f) for f in getattr(body, "_fields", [])}
+                    except Exception:
+                        body_items = {f: getattr(body, f, None) for f in getattr(body, "_fields", [])}
+
+                    payload = {
+                        "context": context,
+                        "type": "APIResp",
+                        "header": hdr_items,
+                        "body": {k: (str(v)[:1000] if v is not None else None) for k, v in body_items.items()},
+                    }
+                    # human-friendly console debug
+                    self.logger.debug(f"{context} - APIResp header: {hdr_items}")
+                    # structured JSON log (for parsers)
+                    self.logger.debug("structured_response", extra={"json_payload": payload})
+                    return
+                except Exception:
+                    pass
+
+            # requests.Response 또는 response 속성이 있는 예외
+            resp = None
+            if hasattr(obj, "response"):
+                resp = getattr(obj, "response")
+            elif hasattr(obj, "getResponse"):
+                try:
+                    resp = obj.getResponse()
+                except Exception:
+                    resp = None
+            elif hasattr(obj, "headers") and hasattr(obj, "text"):
+                resp = obj
+
+            if resp is not None:
+                try:
+                    headers = dict(resp.headers) if hasattr(resp, "headers") else {}
+                except Exception:
+                    headers = {}
+                try:
+                    text = resp.text if hasattr(resp, "text") else str(resp)
+                except Exception:
+                    text = str(resp)
+
+                payload = {
+                    "context": context,
+                    "type": "http",
+                    "http_status": getattr(resp, "status_code", None),
+                    "http_headers": headers,
+                    "http_body_truncated": (text[:1000] if text is not None else None),
+                }
+                # human console
+                self.logger.debug(f"{context} - HTTP headers: {headers}")
+                self.logger.debug(f"{context} - HTTP body (truncated): {text[:1000]}")
+                # structured JSON
+                self.logger.debug("structured_response", extra={"json_payload": payload})
+                return
+
+            # pandas DataFrame
+            try:
+                import pandas as _pd
+
+                if isinstance(obj, _pd.DataFrame):
+                    df_head = obj.head(5).to_dict(orient="list")
+                    payload = {"context": context, "type": "dataframe", "head": df_head}
+                    self.logger.debug(f"{context} - DataFrame head:\n{obj.head(5).to_string()}")
+                    self.logger.debug("structured_response", extra={"json_payload": payload})
+                    return
+            except Exception:
+                pass
+
+            # dict/list/tuple
+            if isinstance(obj, (dict, list, tuple)):
+                payload = {"context": context, "type": "payload", "payload": obj}
+                self.logger.debug(f"{context} - payload: {str(obj)[:1000]}")
+                self.logger.debug("structured_response", extra={"json_payload": payload})
+                return
+
+            # fallback: 문자열화하여 로깅
+            payload = {"context": context, "type": "text", "text": str(obj)[:1000]}
+            self.logger.debug(f"{context} - {str(obj)[:1000]}")
+            self.logger.debug("structured_response", extra={"json_payload": payload})
+        except Exception as ex:
+            # 절대 예외를 일으키지 않음
+            self.logger.debug(f"{context} - 상세 응답 로깅 실패: {ex}")
 
     def _check_retry_on_empty_or_rate_limit(self, result, exception) -> bool:
         """기본 재시도 판정기

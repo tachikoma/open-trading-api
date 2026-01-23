@@ -61,6 +61,27 @@ def setup_logger(name: str, log_dir: Path, level: str = "INFO"):
         rotating_handler.setFormatter(formatter)
         root_logger.addHandler(rotating_handler)
 
+    # JSON 로그 파일 핸들러: 기존 로그파일 이름에 .json 확장자를 붙여 저장
+    try:
+        json_log_path = Path(str(log_file_path) + ".json")
+        has_json = False
+        for h in root_logger.handlers:
+            if isinstance(h, RotatingFileHandler) and getattr(h, "baseFilename", None) == str(json_log_path):
+                has_json = True
+                break
+        if not has_json:
+            json_handler = RotatingFileHandler(
+                filename=str(json_log_path),
+                maxBytes=int(Config.LOG_MAX_BYTES),
+                backupCount=int(Config.LOG_BACKUP_COUNT),
+                encoding="utf-8",
+            )
+            json_handler.setFormatter(JsonFormatter())
+            root_logger.addHandler(json_handler)
+    except Exception:
+        # JSON 핸들러에 실패해도 기존 파일 로깅은 유지
+        pass
+
     # Remove duplicate RotatingFileHandler entries pointing to same file (safety)
     seen_files = set()
     for h in list(root_logger.handlers):
