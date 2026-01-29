@@ -31,6 +31,7 @@ spec.loader.exec_module(ka)
 sys.modules["kis_auth"] = ka
 
 from domestic_stock import domestic_stock_functions as dsf
+from overseas_stock import overseas_stock_functions as osf
 
 # trading_bot 모듈 import (절대 경로)
 from trading_bot.config import Config
@@ -582,34 +583,35 @@ class KISBroker:
             self.logger.info(f"매수 주문 완료: {symbol}, 수량: {qty}, 가격: {price}")
             # 알림 전송 (성공)
             try:
-                    # 시도: result에서 주문ID 추출
-                    order_id = None
+                # 시도: result에서 주문ID 추출
+                order_id = None
+                try:
+                    import pandas as _pd
+                    if isinstance(result, _pd.DataFrame) and not result.empty:
+                        for col in ("ord_no", "ordno", "odno", "orgn_odno", "order_no", "orderId", "order_id"):
+                            if col in result.columns:
+                                v = result.iloc[0].get(col)
+                                if v:
+                                    order_id = str(v)
+                                    break
+                except Exception:
+                    pass
+                if not order_id:
                     try:
-                        import pandas as _pd
-                        if isinstance(result, _pd.DataFrame) and not result.empty:
-                            for col in ("ord_no", "ordno", "odno", "orgn_odno", "order_no", "orderId", "order_id"):
-                                if col in result.columns:
-                                    v = result.iloc[0].get(col)
-                                    if v:
-                                        order_id = str(v)
-                                        break
+                        if isinstance(result, dict):
+                            for k in ("order_no", "ord_no", "odno", "orgn_odno", "ordno", "orderId", "order_id"):
+                                v = result.get(k)
+                                if v:
+                                    order_id = str(v)
+                                    break
                     except Exception:
                         pass
-                    if not order_id:
-                        try:
-                            if isinstance(result, dict):
-                                for k in ("order_no", "ord_no", "odno", "orgn_odno", "ordno", "orderId", "order_id"):
-                                    v = result.get(k)
-                                    if v:
-                                        order_id = str(v)
-                                        break
-                        except Exception:
-                            pass
 
-                    notify_order("BUY", symbol, qty, price, True, order_id=order_id)
+                notify_order("BUY", symbol, qty, price, True, order_id=order_id)
             except Exception:
                 pass
-                return {"success": True, "data": result, "order_id": order_id}
+
+            return {"success": True, "data": result, "order_id": order_id}
         except Exception as e:
             self.logger.error(f"매수 주문 실패 ({symbol}): {e}")
             # 알림 전송 (실패)
@@ -654,34 +656,35 @@ class KISBroker:
             self.logger.info(f"매도 주문 완료: {symbol}, 수량: {qty}, 가격: {price}")
             # 알림 전송 (성공)
             try:
-                    # 시도: result에서 주문ID 추출
-                    order_id = None
+                # 시도: result에서 주문ID 추출
+                order_id = None
+                try:
+                    import pandas as _pd
+                    if isinstance(result, _pd.DataFrame) and not result.empty:
+                        for col in ("ord_no", "ordno", "odno", "orgn_odno", "order_no", "orderId", "order_id"):
+                            if col in result.columns:
+                                v = result.iloc[0].get(col)
+                                if v:
+                                    order_id = str(v)
+                                    break
+                except Exception:
+                    pass
+                if not order_id:
                     try:
-                        import pandas as _pd
-                        if isinstance(result, _pd.DataFrame) and not result.empty:
-                            for col in ("ord_no", "ordno", "odno", "orgn_odno", "order_no", "orderId", "order_id"):
-                                if col in result.columns:
-                                    v = result.iloc[0].get(col)
-                                    if v:
-                                        order_id = str(v)
-                                        break
+                        if isinstance(result, dict):
+                            for k in ("order_no", "ord_no", "odno", "orgn_odno", "ordno", "orderId", "order_id"):
+                                v = result.get(k)
+                                if v:
+                                    order_id = str(v)
+                                    break
                     except Exception:
                         pass
-                    if not order_id:
-                        try:
-                            if isinstance(result, dict):
-                                for k in ("order_no", "ord_no", "odno", "orgn_odno", "ordno", "orderId", "order_id"):
-                                    v = result.get(k)
-                                    if v:
-                                        order_id = str(v)
-                                        break
-                        except Exception:
-                            pass
 
-                    notify_order("SELL", symbol, qty, price, True, order_id=order_id)
+                notify_order("SELL", symbol, qty, price, True, order_id=order_id)
             except Exception:
                 pass
-                return {"success": True, "data": result, "order_id": order_id}
+
+            return {"success": True, "data": result, "order_id": order_id}
         except Exception as e:
             self.logger.error(f"매도 주문 실패 ({symbol}): {e}")
             # 알림 전송 (실패)
@@ -730,6 +733,105 @@ class KISBroker:
             self.logger.error(f"주문 취소 실패 ({order_no}): {e}")
             return {"success": False, "message": str(e)}
 
+    # ==================== 해외 주문 지원 ====================
+    def _map_overseas_ord_dvsn(self, order_type: str, side: str) -> Tuple[str, str]:
+        """주문유형(전략에서 전달되는 'LIMIT'/'LOC' 등)을 API 파라미터로 매핑합니다.
+
+        Returns:
+            (ord_svr_dvsn_cd, ord_dvsn)
+        """
+        ot = (order_type or "LIMIT").upper()
+        # ord_svr_dvsn_cd는 대부분 '0'을 사용
+        ord_svr = "0"
+        # ord_dvsn: 해외 API 문서에 따른 값 매핑
+        mapping = {
+            "LIMIT": "00",
+            "LOO": "32",
+            "LOC": "34",
+            "MOO": "31",
+            "MOC": "33",
+        }
+        ord_dvsn = mapping.get(ot, "00")
+        # 일부 주문 유형은 매도/매수에서 유효값이 다르므로 필요 시 side에 따라 조정 가능
+        return ord_svr, ord_dvsn
+
+    def buy_overseas(self, symbol: str, qty: int, price: float, order_type: str = "LIMIT", ovrs_excg_cd: str = None) -> Optional[Dict]:
+        """해외주식 매수 주문 래퍼
+
+        Args:
+            symbol: 해외 종목 코드 (예: AAPL)
+            qty: 주문 수량
+            price: 해외 통화 단가 (예: 150.25)
+            order_type: 전략이 지정하는 주문유형 (예: 'LIMIT', 'LOC')
+            ovrs_excg_cd: 거래소 코드(예: 'NASD'). 미지정 시 기본 'NASD' 사용
+        """
+        if not Config.TRADING_ENABLED:
+            self.logger.warning(f"[DRY RUN] 해외 매수 주문: {symbol}, qty={qty}, price={price}, type={order_type}")
+            return {"success": False, "message": "TRADING_ENABLED=False"}
+
+        try:
+            ord_svr, ord_dvsn = self._map_overseas_ord_dvsn(order_type, side="buy")
+            ovrs_excg = ovrs_excg_cd or self.config_overseas_default() if hasattr(self, 'config_overseas_default') else ("NASD")
+            res = self._call_with_retry(
+                osf.order,
+                cano=self.account,
+                acnt_prdt_cd=self.product_code,
+                ovrs_excg_cd=ovrs_excg,
+                pdno=symbol,
+                ord_qty=str(qty),
+                ovrs_ord_unpr=str(price),
+                ord_dv="buy",
+                ctac_tlno="",
+                mgco_aptm_odno="",
+                ord_svr_dvsn_cd=ord_svr,
+                ord_dvsn=ord_dvsn,
+                env_dv=self.env_mode,
+                check_result=self._check_retry_on_empty_or_rate_limit,
+            )
+            return {"success": True, "data": res}
+        except Exception as e:
+            self.logger.error(f"해외 매수 주문 실패 ({symbol}): {e}")
+            try:
+                notify_order("BUY_OVR", symbol, qty, price, False, message=str(e))
+            except Exception:
+                pass
+            return {"success": False, "message": str(e)}
+
+    def sell_overseas(self, symbol: str, qty: int, price: float, order_type: str = "LIMIT", ovrs_excg_cd: str = None) -> Optional[Dict]:
+        """해외주식 매도 주문 래퍼
+        """
+        if not Config.TRADING_ENABLED:
+            self.logger.warning(f"[DRY RUN] 해외 매도 주문: {symbol}, qty={qty}, price={price}, type={order_type}")
+            return {"success": False, "message": "TRADING_ENABLED=False"}
+
+        try:
+            ord_svr, ord_dvsn = self._map_overseas_ord_dvsn(order_type, side="sell")
+            ovrs_excg = ovrs_excg_cd or self.config_overseas_default() if hasattr(self, 'config_overseas_default') else ("NASD")
+            res = self._call_with_retry(
+                osf.order,
+                cano=self.account,
+                acnt_prdt_cd=self.product_code,
+                ovrs_excg_cd=ovrs_excg,
+                pdno=symbol,
+                ord_qty=str(qty),
+                ovrs_ord_unpr=str(price),
+                ord_dv="sell",
+                ctac_tlno="",
+                mgco_aptm_odno="",
+                ord_svr_dvsn_cd=ord_svr,
+                ord_dvsn=ord_dvsn,
+                env_dv=self.env_mode,
+                check_result=self._check_retry_on_empty_or_rate_limit,
+            )
+            return {"success": True, "data": res}
+        except Exception as e:
+            self.logger.error(f"해외 매도 주문 실패 ({symbol}): {e}")
+            try:
+                notify_order("SELL_OVR", symbol, qty, price, False, message=str(e))
+            except Exception:
+                pass
+            return {"success": False, "message": str(e)}
+
     def execute_intents(self, intents: List[Dict[str, Any]], strategy: Any = None, simulate_only: bool = False) -> List[Dict[str, Any]]:
         """전략이 생성한 주문 의도(intent) 목록을 실행하는 유틸 메서드.
 
@@ -752,8 +854,14 @@ class KISBroker:
             try:
                 ttype = intent.get("type")
                 symbol = intent.get("symbol") or intent.get("sym")
+                # API 호출에는 원시 심볼(예: AAPL, 005930)을 사용하고
+                # 표시용으로는 format_symbol을 사용합니다.
+                symbol_display = None
                 if symbol and isinstance(symbol, str):
-                    symbol = format_symbol(symbol)
+                    try:
+                        symbol_display = format_symbol(symbol)
+                    except Exception:
+                        symbol_display = symbol
                 price = int(round(float(intent.get("price", 0))))
 
                 # 수량 결정: intent에 'quantity'가 명시되어 있으면 우선 사용하고,
@@ -797,12 +905,26 @@ class KISBroker:
                     continue
 
                 # 라이브 경로: 실제 매수/매도 API 호출
-                if ttype == "buy":
-                    res = self.buy(symbol, qty, price, order_type=str(intent.get("order_type", "00")))
-                elif ttype == "sell":
-                    res = self.sell(symbol, qty, price, order_type=str(intent.get("order_type", "00")))
+                # 해외주식 라우팅: intent에 'market'=='overseas' 또는 'ovrs_excg_cd'가 포함된 경우
+                is_overseas = bool(intent.get("market") == "overseas" or intent.get("ovrs_excg_cd"))
+
+                if is_overseas:
+                    ovrs_excg = intent.get("ovrs_excg_cd")
+                    ord_type = str(intent.get("order_type", "LIMIT"))
+                    if ttype == "buy":
+                        res = self.buy_overseas(symbol, qty, price, order_type=ord_type, ovrs_excg_cd=ovrs_excg)
+                    elif ttype == "sell":
+                        res = self.sell_overseas(symbol, qty, price, order_type=ord_type, ovrs_excg_cd=ovrs_excg)
+                    else:
+                        res = {"success": False, "message": f"알 수 없는 intent 타입: {ttype}"}
                 else:
-                    res = {"success": False, "message": f"알 수 없는 intent 타입: {ttype}"}
+                    if ttype == "buy":
+                        res = self.buy(symbol, qty, price, order_type=str(intent.get("order_type", "00")))
+                    elif ttype == "sell":
+                        res = self.sell(symbol, qty, price, order_type=str(intent.get("order_type", "00")))
+                    else:
+                        res = {"success": False, "message": f"알 수 없는 intent 타입: {ttype}"}
+                
 
                 results.append({"intent": intent, "result": res})
 
@@ -813,6 +935,17 @@ class KISBroker:
                         strategy.state["cum_buy_amt"] = strategy.state.get("cum_buy_amt", 0.0) + float(amt)
                         try:
                             strategy.record_trade({"symbol": symbol, "qty": qty, "price": price, "amount": amt, "side": "buy", "order_id": res.get("order_id")})
+                        except Exception:
+                            pass
+                        # 성공적으로 매수가 실행되었으면 해당 T에 대해 실행표시를 남깁니다(하루 1회 제한)
+                        try:
+                            t_val = intent.get("T")
+                            exec_date = intent.get("exec_date")
+                            if hasattr(strategy, "_mark_executed_T") and t_val is not None and exec_date is not None:
+                                try:
+                                    strategy._mark_executed_T(t_val, exec_date)
+                                except Exception:
+                                    pass
                         except Exception:
                             pass
                     else:

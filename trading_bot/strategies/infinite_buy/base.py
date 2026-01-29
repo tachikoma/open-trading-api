@@ -66,6 +66,23 @@ class InfiniteBuyBase(ABC):
         """전략 내부의 거래 기록을 저장합니다 (백테스트/로그용)."""
         self.state.setdefault("trades", []).append(trade)
 
+    # ==================== 하루 1회 실행 제약 헬퍼 ====================
+    def _can_execute_T_today(self, T: float, date_str: str) -> bool:
+        """주어진 T에 대해 `date_str`(YYYY-MM-DD 혹은 유사 문자열) 날짜에 이미 실행했는지 검사합니다.
+
+        - 상태 키 `last_exec_by_T`는 {str(T): date_str} 형태로 저장됩니다.
+        - 같은 날짜에 재실행을 허용하지 않습니다.
+        """
+        last_map = self.state.setdefault("last_exec_by_T", {})
+        key = str(T)
+        last = last_map.get(key)
+        return last != date_str
+
+    def _mark_executed_T(self, T: float, date_str: str) -> None:
+        """주어진 T에 대해 `date_str`로 실행 표식을 남깁니다."""
+        last_map = self.state.setdefault("last_exec_by_T", {})
+        last_map[str(T)] = date_str
+
     def get_state(self) -> Dict[str, Any]:
         """전략의 내부 상태(state) 딕셔너리를 반환합니다."""
         return self.state

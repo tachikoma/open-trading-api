@@ -50,6 +50,9 @@ class InfiniteBuyV2_2(InfiniteBuyBase):
         target_star = price * (1.0 + float(star_pct) / 100.0)
         target_plus10 = price * 1.10
 
+        # 주문유형은 설정값으로 제어 가능 (기본 LOC 또는 config에서 지정)
+        order_type = str(self.config.get("order_type", "LOC"))
+
         intent = {
             "type": "buy",
             "symbol": symbol,
@@ -58,6 +61,10 @@ class InfiniteBuyV2_2(InfiniteBuyBase):
             "quantity": qty,
             "T": T,
             "star_percent": star_pct,
+            "order_type": order_type,
+            "market": self.config.get("market", "overseas"),
+            "ovrs_excg_cd": self.config.get("ovrs_excg_cd", None),
+            "exec_date": date,
             "targets": [
                 {"fraction": 0.25, "price": target_star},
                 {"fraction": 0.75, "price": target_plus10},
