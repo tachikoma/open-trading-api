@@ -6,10 +6,9 @@ KIS Broker 래퍼 클래스
 """
 import sys
 from pathlib import Path
-from typing import Optional, Dict, Any, Tuple
+from typing import List, Optional, Dict, Any, Tuple
 import pandas as pd
 import time
-import os
 import importlib.util
 
 # 프로젝트 루트 경로 추가
@@ -730,3 +729,100 @@ class KISBroker:
         except Exception as e:
             self.logger.error(f"주문 취소 실패 ({order_no}): {e}")
             return {"success": False, "message": str(e)}
+
+    def execute_intents(self, intents: List[Dict[str, Any]], strategy: Any = None, simulate_only: bool = False) -> List[Dict[str, Any]]:
+        """전략이 생성한 주문 의도(intent) 목록을 실행하는 유틸 메서드.
+
+        설명:
+            전략은 `decide_buy`/`decide_sell`에서 의도(intent) 딕셔너리 목록을 반환합니다.
+            이 메서드는 그 의도들을 받아서 실제 주문을 실행하거나(라이브),
+            시뮬레이션(드라이런) 결과를 반환합니다. 또한 주문 성공 시 선택적으로
+            전략 인스턴스의 상태(`state['cum_buy_amt']`)를 갱신하고 거래 기록을 남깁니다.
+
+        인자:
+            intents: 전략에서 생성한 intent 딕셔너리의 목록 (v2.2 포맷 권장)
+            strategy: 선택적 전략 객체. 전달하면 주문 실행 후 `state` 갱신 및 `record_trade` 호출을 시도합니다.
+            simulate_only: True이면 실제 주문을 호출하지 않고 드라이런(시뮬레이션) 결과만 반환합니다.
+
+        반환값:
+            각 intent에 대한 처리 결과를 담은 딕셔너리 리스트. 각 원소는 `{"intent": intent, "result": result}` 형태입니다.
+        """
+        results: List[Dict[str, Any]] = []
+        for intent in intents:
+            try:
+                ttype = intent.get("type")
+                symbol = intent.get("symbol") or intent.get("sym")
+                if symbol and isinstance(symbol, str):
+                    symbol = format_symbol(symbol)
+                price = int(round(float(intent.get("price", 0))))
+
+                # 수량 결정: intent에 'quantity'가 명시되어 있으면 우선 사용하고,
+                # 없으면 'amount'와 'price'로부터 정수 수량을 계산합니다.
+                qty = intent.get("quantity")
+                if qty is None:
+                    amount = float(intent.get("amount", 0.0))
+                    if price > 0:
+                        qty = int(amount // price)
+                    else:
+                        qty = 0
+                else:
+                    qty = int(qty)
+
+                # 유효 수량 검증
+                if qty <= 0:
+                    msg = "zero_qty_or_invalid_price"
+                    self.logger.warning(f"의도 건너뜀: {msg} intent={intent}")
+                    results.append({"intent": intent, "result": {"success": False, "message": msg}})
+                    continue
+
+                # 드라이런(시뮬레이션) 경로: Config 또는 인자에 의해 실제 주문을 보내지 않을 때
+                if simulate_only or not Config.TRADING_ENABLED:
+                    self.logger.info(f"[DRY RUN] 의도 실행: {ttype} {symbol} qty={qty} price={price}")
+                    fake_res = {"success": True, "order_id": None, "data": None}
+                    results.append({"intent": intent, "result": fake_res})
+
+                    # 전략 객체가 제공된 경우 상태 갱신 및 거래 기록(기록 함수 호출)을 시도
+                    if strategy is not None and ttype == "buy" and fake_res.get("success"):
+                        amt = qty * price
+                        strategy.state["cum_buy_amt"] = strategy.state.get("cum_buy_amt", 0.0) + float(amt)
+                        try:
+                            strategy.record_trade({"symbol": symbol, "qty": qty, "price": price, "amount": amt, "side": "buy"})
+                        except Exception:
+                            pass
+                    elif strategy is not None and ttype == "sell" and fake_res.get("success"):
+                        try:
+                            strategy.record_trade({"symbol": symbol, "qty": qty, "price": price, "amount": qty * price, "side": "sell"})
+                        except Exception:
+                            pass
+                    continue
+
+                # 라이브 경로: 실제 매수/매도 API 호출
+                if ttype == "buy":
+                    res = self.buy(symbol, qty, price, order_type=str(intent.get("order_type", "00")))
+                elif ttype == "sell":
+                    res = self.sell(symbol, qty, price, order_type=str(intent.get("order_type", "00")))
+                else:
+                    res = {"success": False, "message": f"알 수 없는 intent 타입: {ttype}"}
+
+                results.append({"intent": intent, "result": res})
+
+                # 주문이 성공적으로 응답된 경우(확정 응답이라고 가정) 전략 상태 갱신 시도
+                if strategy is not None and isinstance(res, dict) and res.get("success"):
+                    if ttype == "buy":
+                        amt = qty * price
+                        strategy.state["cum_buy_amt"] = strategy.state.get("cum_buy_amt", 0.0) + float(amt)
+                        try:
+                            strategy.record_trade({"symbol": symbol, "qty": qty, "price": price, "amount": amt, "side": "buy", "order_id": res.get("order_id")})
+                        except Exception:
+                            pass
+                    else:
+                        try:
+                            strategy.record_trade({"symbol": symbol, "qty": qty, "price": price, "amount": qty * price, "side": "sell", "order_id": res.get("order_id")})
+                        except Exception:
+                            pass
+
+            except Exception as e:
+                self.logger.error(f"execute_intents: failed to process intent {intent}: {e}")
+                results.append({"intent": intent, "result": {"success": False, "message": str(e)}})
+
+        return results

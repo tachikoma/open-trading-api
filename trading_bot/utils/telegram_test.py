@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Simple uv-run test for Telegram notifier.
+"""텔레그램 알림 유틸리티의 간단한 테스트 스크립트 (uv run용).
 
-Usage:
-  # from project root
+사용법:
+  # 프로젝트 루트에서
   uv run trading_bot/utils/telegram_test.py
 
-This script reads `Config` and attempts to send a test message when
-`TELEGRAM_ENABLED=1`. It prints the result.
+이 스크립트는 `Config`를 읽고 `TELEGRAM_ENABLED`가 활성화된 경우 테스트 메시지를 전송합니다.
+결과를 출력합니다.
 """
 import sys
 from pathlib import Path
@@ -21,10 +21,10 @@ from trading_bot.utils.telegram import send_telegram_message
 
 
 def main():
-    print(f"Testing Telegram (enabled={Config.TELEGRAM_ENABLED})")
-    text = f"[Test] trading_bot at {PROJECT_ROOT.name} — env={Config.ENV_MODE}"
-    ok = send_telegram_message(text)
-    print("Sent:" , ok)
+  print(f"텔레그램 테스트 (enabled={Config.TELEGRAM_ENABLED})")
+  text = f"[Test] trading_bot at {PROJECT_ROOT.name} — env={Config.ENV_MODE}"
+  ok = send_telegram_message(text)
+  print("전송됨:", ok)
 
 
 if __name__ == '__main__':

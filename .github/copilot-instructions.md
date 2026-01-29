@@ -545,8 +545,14 @@ uv run trading_bot/run_backtest.py --source db --db-path trading_bot/backtest_da
 2. **trading_bot 격리**: 모든 커스텀 코드는 `trading_bot/` 폴더에만
 3. **실행은 항상 `uv run`**
 4. **Import는 항상 절대 경로**
-5. **문서는 uv 기준으로 작성**
+5. **문서는 uv 기준으로 작성, 그리고 한글로**
 6. **경로는 trading_bot 폴더 기준**
+7. **의존성은 pyproject.toml에 추가 후 uv sync**
+8. **결과 파일은 trading_bot/backtest_results/에 저장**
+9. **환경 모드 변경 시 토큰 삭제 필수**
+10. **코딩 컨벤션 준수**
+11. **문서 작성 시 TRADING_BOT.md 또는 trading_bot/ 하위만 수정, 그리고 한글로**
+12. **주석은 한글로 작성하며 "왜"를 설명하는 완전한 문장으로 작성**
 
 ### 빠른 참조
 ```bash

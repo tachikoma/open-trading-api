@@ -10,16 +10,16 @@ _LOADED = False
 
 
 def _default_data_dir() -> Path:
-    # trading_bot/data relative to this file
+    # trading_bot/data를 기본 데이터 디렉토리로 사용합니다 (이 파일 기준 상대경로)
     return Path(__file__).parent.parent / "data"
 
 
 def load_symbol_map(dir_path: str = None) -> Dict[str, str]:
-    """Load symbol->name mapping.
+    """심볼(종목코드) -> 이름 매핑을 로드합니다.
 
-    Priority:
-    1. CSV files under `dir_path` (or default trading_bot/data)
-    2. Fallback: attempt to load from `stocks_info` master modules
+    우선순위:
+    1. `dir_path`(또는 기본 `trading_bot/data`) 아래의 CSV 파일들
+    2. 대안으로 `stocks_info` 패키지의 마스터 데이터를 시도해서 로드합니다
     """
     global _SYMBOL_MAP, _LOADED
     if _LOADED:
@@ -96,10 +96,10 @@ def load_symbol_map(dir_path: str = None) -> Dict[str, str]:
 
 
 def get_symbol_name(symbol: str) -> str:
-    """Return the mapped name for symbol, or empty string if not found.
+    """주어진 종목코드의 매핑된 이름을 반환합니다.
 
-    This uses the configured `Config.SYMBOL_MAP_DIR` (or repository default)
-    and does not accept a directory argument so existing call sites stay unchanged.
+    찾지 못하면 빈 문자열을 반환합니다. 내부적으로 `Config.SYMBOL_MAP_DIR` 또는
+    저장소 기본 위치를 사용합니다. 기존 호출부와 호환되도록 디렉토리 인자는 받지 않습니다.
     """
     if not symbol:
         return ""
@@ -108,12 +108,22 @@ def get_symbol_name(symbol: str) -> str:
     return _SYMBOL_MAP.get(key, "")
 
 
-def format_symbol(symbol: str) -> str:
-    """Return '이름(종목코드)' if name exists, else original symbol.
+def format_symbol(symbol: str, dir_path: str = None) -> str:
+    """이름이 존재하면 '이름(종목코드)' 형식으로 반환하고, 없으면 원래 symbol을 반환합니다.
 
-    Uses `get_symbol_name()` (which relies on `Config.SYMBOL_MAP_DIR`).
+    선택적으로 `dir_path`를 전달하면 해당 디렉토리의 CSV를 우선 사용하여 매핑을 로드합니다.
     """
-    name = get_symbol_name(symbol)
+    if not symbol:
+        return ""
+
+    # dir_path가 주어지면 명시적으로 해당 디렉토리에서 매핑을 로드합니다.
+    if dir_path:
+        load_symbol_map(dir_path)
+    else:
+        load_symbol_map()
+
+    key = symbol.strip()
+    name = _SYMBOL_MAP.get(key, "")
     if name:
         return f"{name}({symbol})"
     return symbol
