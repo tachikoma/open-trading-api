@@ -16,7 +16,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from trading_bot.config import Config
 from trading_bot.broker import KISBroker
-from trading_bot.strategies import MovingAverageCrossover
+from trading_bot.strategies.registry import load_enabled_strategies
 from trading_bot.scheduler import SimpleScheduler
 from trading_bot.utils.logger import setup_logger
 
@@ -43,15 +43,9 @@ def main():
         logger.info("KIS Broker 초기화 중...")
         broker = KISBroker(env_mode=Config.ENV_MODE)
         
-        # 전략 초기화
+        # 전략 초기화 (동적 레지스트리 사용)
         logger.info("전략 초기화 중...")
-        strategies = [
-            MovingAverageCrossover(
-                broker=broker,
-                short_period=Config.MA_SHORT_PERIOD,
-                long_period=Config.MA_LONG_PERIOD
-            )
-        ]
+        strategies = load_enabled_strategies(Config.STRATEGIES_ENABLED, broker)
         
         # 스케줄러 초기화
         logger.info("스케줄러 초기화 중...")

@@ -332,6 +332,126 @@ class KISBroker:
             # 절대 예외를 일으키지 않음
             self.logger.debug(f"{context} - 상세 응답 로깅 실패: {ex}")
 
+    def _extract_exec_price_and_qty(self, res) -> tuple:
+        """다양한 API 응답 포맷에서 실행가격(exec_price)과 실행수량(exec_qty)을 추출합니다.
+
+        반환값: (exec_price: float|None, exec_qty: int|None)
+        - res는 execute_intents에서 사용하는 `res` 객체일 수 있으며,
+          dict({'data': ...}), pandas.DataFrame, list[dict], 또는 중첩 dict 형태일 수 있습니다.
+        """
+        exec_price = None
+        exec_qty = None
+
+        # 후보 키 목록 (우선순위)
+        price_keys = [
+            "exec_price", "exec_prc", "execPrz", "execPr", "exec_prc", "trade_price", "trade_prc",
+            "trd_prc", "price", "filledPrice", "filled_price", "avg_price", "avg_prc",
+            "체결가", "체결가격", "fm_ccld_pric", "fm_ccld_amt", "trdPrice", "tradePrice",
+        ]
+        qty_keys = [
+            "exec_qty", "exec_qy", "execQy", "trade_qty", "trade_qy", "trd_qty", "qty", "quantity",
+            "체결수량", "ccld_qty", "fm_ccld_qty", "filledQty", "filledQuantity", "filled_qty",
+        ]
+
+        # 원시 데이터가 dict 형태로 감싸져 있는 경우(data 키)
+        d = None
+        if isinstance(res, dict) and "data" in res:
+            d = res.get("data")
+        else:
+            d = res
+
+        # pandas DataFrame 처리
+        try:
+            import pandas as _pd
+        except Exception:
+            _pd = None
+
+        if _pd is not None and isinstance(d, _pd.DataFrame):
+            if not d.empty:
+                row = d.iloc[0]
+                for k in price_keys:
+                    if k in row.index and row.get(k) is not None:
+                        try:
+                            exec_price = float(row.get(k))
+                            break
+                        except Exception:
+                            continue
+                for k in qty_keys:
+                    if k in row.index and row.get(k) is not None:
+                        try:
+                            exec_qty = int(float(row.get(k)))
+                            break
+                        except Exception:
+                            continue
+                return exec_price, exec_qty
+
+        # 리스트(예: [{'exec_price':...}, ...])
+        if isinstance(d, (list, tuple)) and len(d) > 0 and isinstance(d[0], dict):
+            first = d[0]
+            for k in price_keys:
+                if k in first and first.get(k) is not None:
+                    try:
+                        exec_price = float(first.get(k))
+                        break
+                    except Exception:
+                        continue
+            for k in qty_keys:
+                if k in first and first.get(k) is not None:
+                    try:
+                        exec_qty = int(float(first.get(k)))
+                        break
+                    except Exception:
+                        continue
+            return exec_price, exec_qty
+
+        # dict의 경우 여러 레벨 탐색 (얕은 탐색)
+        if isinstance(d, dict):
+            # 우선 최상위에서 찾기
+            for k in price_keys:
+                if k in d and d.get(k) is not None:
+                    try:
+                        exec_price = float(d.get(k))
+                        break
+                    except Exception:
+                        continue
+            for k in qty_keys:
+                if k in d and d.get(k) is not None:
+                    try:
+                        exec_qty = int(float(d.get(k)))
+                        break
+                    except Exception:
+                        continue
+
+            # 필요 시 nested 구조(예: {'body': {...}}) 한 단계 더 탐색
+            if exec_price is None or exec_qty is None:
+                for v in d.values():
+                    if isinstance(v, dict):
+                        for k in price_keys:
+                            if k in v and v.get(k) is not None:
+                                try:
+                                    exec_price = float(v.get(k))
+                                    break
+                                except Exception:
+                                    continue
+                        for k in qty_keys:
+                            if k in v and v.get(k) is not None:
+                                try:
+                                    exec_qty = int(float(v.get(k)))
+                                    break
+                                except Exception:
+                                    continue
+                    if exec_price is not None and exec_qty is not None:
+                        break
+
+        # 마지막으로, 만약 res 자체가 단순 수치/문자열이면 시도해봄
+        try:
+            if exec_price is None and isinstance(res, (int, float)):
+                exec_price = float(res)
+        except Exception:
+            pass
+
+        return exec_price, exec_qty
+
     def _check_retry_on_empty_or_rate_limit(self, result, exception) -> bool:
         """기본 재시도 판정기
 
@@ -862,7 +982,13 @@ class KISBroker:
                         symbol_display = format_symbol(symbol)
                     except Exception:
                         symbol_display = symbol
-                price = int(round(float(intent.get("price", 0))))
+                # 주문 가격이 None일 수 있음(예: MOC). None이면 0으로 처리.
+                raw_price = intent.get("price", 0)
+                try:
+                    price = int(round(float(raw_price))) if raw_price is not None else 0
+                except Exception:
+                    # 안전하게 0으로 폴백
+                    price = 0
 
                 # 수량 결정: intent에 'quantity'가 명시되어 있으면 우선 사용하고,
                 # 없으면 'amount'와 'price'로부터 정수 수량을 계산합니다.
@@ -937,6 +1063,16 @@ class KISBroker:
                             strategy.record_trade({"symbol": symbol, "qty": qty, "price": price, "amount": amt, "side": "buy", "order_id": res.get("order_id")})
                         except Exception:
                             pass
+                        # 쿼터 모드 재진입 회차 증가 및 재진입 금액 소모 반영
+                        try:
+                            if intent.get("quota_mode"):
+                                strategy.state["quota_cycle_count"] = int(strategy.state.get("quota_cycle_count", 0)) + 1
+                                # 소모된 금액만큼 재진입 잔액에서 차감
+                                strategy.state["quota_reentry_amount"] = float(strategy.state.get("quota_reentry_amount", 0.0)) - float(amt)
+                                if strategy.state["quota_reentry_amount"] < 0:
+                                    strategy.state["quota_reentry_amount"] = 0.0
+                        except Exception:
+                            pass
                         # 성공적으로 매수가 실행되었으면 해당 T에 대해 실행표시를 남깁니다(하루 1회 제한)
                         try:
                             t_val = intent.get("T")
@@ -951,6 +1087,48 @@ class KISBroker:
                     else:
                         try:
                             strategy.record_trade({"symbol": symbol, "qty": qty, "price": price, "amount": qty * price, "side": "sell", "order_id": res.get("order_id")})
+                        except Exception:
+                            pass
+                        # 쿼터 모드 매도 처리: MOC 체결 가격을 시도 추출하고 재진입 금액에 반영
+                        try:
+                            if intent.get("quota_mode"):
+                                # 실행가격/수량 추출(다양한 포맷 지원)
+                                try:
+                                    exec_price, exec_qty = self._extract_exec_price_and_qty(res if isinstance(res, dict) else {"data": res})
+                                except Exception:
+                                    exec_price, exec_qty = (None, None)
+
+                                # fallback to intent.price if available
+                                if exec_price is None:
+                                    try:
+                                        exec_price = float(intent.get("price")) if intent.get("price") is not None else None
+                                    except Exception:
+                                        exec_price = None
+
+                                # proceeds 계산 및 quota_reentry_amount에 반영
+                                if exec_price is not None:
+                                    try:
+                                        proceeds = float(exec_price) * float(qty)
+                                        strategy.state["quota_reentry_amount"] = float(strategy.state.get("quota_reentry_amount", 0.0)) + proceeds
+                                    except Exception:
+                                        pass
+
+                                # MOC 체결인 경우 -10% 이하 체결 시 쿼터 모드 해제
+                                ord_type = (intent.get("order_type") or "").upper()
+                                ref_avg = None
+                                try:
+                                    ref_avg = float(intent.get("ref_avg_price")) if intent.get("ref_avg_price") is not None else None
+                                except Exception:
+                                    ref_avg = None
+                                if ord_type == "MOC" and exec_price is not None and ref_avg is not None:
+                                    try:
+                                        if float(exec_price) <= float(ref_avg) * 0.90:
+                                            strategy.state["quota_stop_loss_mode"] = False
+                                            strategy.state["quota_cycle_count"] = 0
+                                            strategy.state["quota_final_moc_done"] = False
+                                            # quota_reentry_amount는 이미 선입금/체결금으로 채워졌음
+                                    except Exception:
+                                        pass
                         except Exception:
                             pass
 

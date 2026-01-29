@@ -128,7 +128,7 @@ class Config:
     TELEGRAM_TIMEOUT_SEC = int(os.environ.get("TELEGRAM_TIMEOUT_SEC", _env_vals.get("TELEGRAM_TIMEOUT_SEC", "3")))
 
     # 전략 설정
-    STRATEGIES_ENABLED = ["ma_crossover"]  # 활성화할 전략 목록
+    STRATEGIES_ENABLED = ["ma_crossover", "infinite_buy"]  # 활성화할 전략 목록
 
     # 감시 종목 리스트 (생략 가능, 기존 내용 유지)
     WATCH_LIST = [
@@ -194,7 +194,7 @@ class Config:
         "226950", # 올릭스
         "051910", # LG화학
         "196170", # 알테오젠
-        "459580", # KODEX CD금리액티브(합성)
+        "452430", # 사피엔반도체
         "377300", # 카카오페이
         "360750", # TIGER 미국S&P500
         "379800", # KODEX 미국S&P500
@@ -210,7 +210,7 @@ class Config:
         "272210", # 한화시스템
         "278470", # 에이피알
         "005830", # DB손해보험
-        "488770", # KODEX 머니마켓액티브
+        "411060", # ACE KRX금현물
         "018260", # 삼성에스디에스
         "015760", # 한국전력
         "028260", # 삼성물산
