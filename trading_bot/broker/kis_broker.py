@@ -970,6 +970,7 @@ class KISBroker:
             각 intent에 대한 처리 결과를 담은 딕셔너리 리스트. 각 원소는 `{"intent": intent, "result": result}` 형태입니다.
         """
         results: List[Dict[str, Any]] = []
+        processed_sell = False
         for intent in intents:
             try:
                 ttype = intent.get("type")
@@ -1031,19 +1032,49 @@ class KISBroker:
                     continue
 
                 # 라이브 경로: 실제 매수/매도 API 호출
+                # 전략 상태에 따라 LOC/LIMIT 주문을 즉시 실행하지 않고 EOD에서 확정하도록
+                # strategy.state['pending_orders']에 저장할 수 있습니다.
+                defer_loc_buy = False
+                defer_loc_sell = False
+                try:
+                    if strategy is not None:
+                        defer_loc_buy = bool(strategy.state.get("defer_loc_buy", False))
+                        defer_loc_sell = bool(strategy.state.get("defer_loc_sell", False))
+                except Exception:
+                    defer_loc_buy = False
+                    defer_loc_sell = False
                 # 해외주식 라우팅: intent에 'market'=='overseas' 또는 'ovrs_excg_cd'가 포함된 경우
                 is_overseas = bool(intent.get("market") == "overseas" or intent.get("ovrs_excg_cd"))
 
                 if is_overseas:
                     ovrs_excg = intent.get("ovrs_excg_cd")
                     ord_type = str(intent.get("order_type", "LIMIT"))
+                    # 해외 LOC/LIMIT을 지연 저장할 경우
+                    if ttype == "buy" and ord_type.upper() in ("LOC", "LIMIT") and defer_loc_buy:
+                        try:
+                            pending = strategy.state.setdefault("pending_orders", []) if strategy is not None else []
+                            pending.append({"order_id": None, "side": "buy", "symbol": symbol, "qty": qty, "price": intent.get("price"), "order_type": ord_type, "intent": intent})
+                            results.append({"intent": intent, "result": {"success": True, "deferred": True}})
+                        except Exception:
+                            results.append({"intent": intent, "result": {"success": False, "message": "defer_store_failed"}})
+                        continue
                     if ttype == "buy":
                         res = self.buy_overseas(symbol, qty, price, order_type=ord_type, ovrs_excg_cd=ovrs_excg)
+                    elif ttype == "sell" and ord_type.upper() in ("LOC", "LIMIT") and defer_loc_sell:
+                        try:
+                            pending = strategy.state.setdefault("pending_orders", []) if strategy is not None else []
+                            pending.append({"order_id": None, "side": "sell", "symbol": symbol, "qty": qty, "price": intent.get("price"), "order_type": ord_type, "intent": intent})
+                            results.append({"intent": intent, "result": {"success": True, "deferred": True}})
+                        except Exception:
+                            results.append({"intent": intent, "result": {"success": False, "message": "defer_store_failed"}})
+                        continue
                     elif ttype == "sell":
                         res = self.sell_overseas(symbol, qty, price, order_type=ord_type, ovrs_excg_cd=ovrs_excg)
                     else:
                         res = {"success": False, "message": f"알 수 없는 intent 타입: {ttype}"}
                 else:
+                    # 국내 주문(예: KOSPI/KOSDAQ)은 LOC/LIMIT/MOC 등 고급 주문 타입이
+                    # 적용되지 않는 환경일 수 있으므로 단순 매수/매도 호출로 처리합니다.
                     if ttype == "buy":
                         res = self.buy(symbol, qty, price, order_type=str(intent.get("order_type", "00")))
                     elif ttype == "sell":
@@ -1120,20 +1151,41 @@ class KISBroker:
                                     ref_avg = float(intent.get("ref_avg_price")) if intent.get("ref_avg_price") is not None else None
                                 except Exception:
                                     ref_avg = None
+                                try:
+                                    reason = (intent.get("reason") or "").lower()
+                                    if "initial" in reason:
+                                        strategy.state["quota_initial_moc_done"] = True
+                                    if "final" in reason:
+                                        strategy.state["quota_final_moc_done"] = True
+                                except Exception:
+                                    pass
+
                                 if ord_type == "MOC" and exec_price is not None and ref_avg is not None:
                                     try:
                                         if float(exec_price) <= float(ref_avg) * 0.90:
                                             strategy.state["quota_stop_loss_mode"] = False
                                             strategy.state["quota_cycle_count"] = 0
-                                            strategy.state["quota_final_moc_done"] = False
                                             # quota_reentry_amount는 이미 선입금/체결금으로 채워졌음
                                     except Exception:
                                         pass
+                                # 판매가 처리됨을 표시
+                                processed_sell = True
                         except Exception:
                             pass
 
             except Exception as e:
                 self.logger.error(f"execute_intents: failed to process intent {intent}: {e}")
                 results.append({"intent": intent, "result": {"success": False, "message": str(e)}})
+
+        # 배치 처리 후: 판매가 처리되었고 전략 상태에 쿼터 진입 대기 플래그가 있으면
+        # 다음 매수 턴에서 쿼터 모드를 활성화하도록 표시합니다.
+        try:
+            if processed_sell and strategy is not None:
+                if strategy.state.get("quota_enter_pending"):
+                    strategy.state["quota_activate_on_next_buy"] = True
+                    # 진입 대기 플래그는 제거
+                    strategy.state.pop("quota_enter_pending", None)
+        except Exception:
+            pass
 
         return results

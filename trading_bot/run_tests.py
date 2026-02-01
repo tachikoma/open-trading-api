@@ -8,4 +8,4 @@ if __name__ == "__main__":
 
     # pytest를 trading_bot 폴더 기준으로 실행
     import pytest
-    sys.exit(pytest.main(["-q", "trading_bot/tests/test_token_refresh.py"]))
+    sys.exit(pytest.main(["-q", "tests/test_quota_lifecycle.py"]))

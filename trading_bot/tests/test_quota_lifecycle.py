@@ -107,3 +107,63 @@ def test_quota_final_moc_exit_on_negative_fill():
         assert abs(strategy.state.get("quota_reentry_amount", 0.0) - 89.0) < 1e-6
     finally:
         Config.TRADING_ENABLED = prev
+
+
+def test_initial_moc_flow_and_state_update():
+    broker = _make_broker_without_auth()
+    config = {"total_amount": 1000, "one_shot_amount": 100, "market": "overseas"}
+    strategy = InfiniteBuyV2_2(config=config, broker=broker)
+
+    # prepare state: quota mode entered but initial MOC not done
+    strategy.state["quota_stop_loss_mode"] = True
+    strategy.state["quota_initial_moc_done"] = False
+    strategy.state["quota_reentry_amount"] = 0.0
+
+    # position with quantity so that 1/4 exists
+    position = {"symbol": "TST", "quantity": 4, "avg_price": 100.0, "cum_buy_amt": strategy.state.get("cum_buy_amt", 0.0)}
+
+    intents = strategy.decide_sell(position, market_price=None)
+    # 최초 진입시에는 MOC 의도가 생성되어야 함
+    assert any((it.get("order_type") == "MOC" and "initial" in (it.get("reason") or "")) for it in intents)
+
+    # monkeypatch broker.sell to return MOC fill at 95.0
+    def fake_sell(self, symbol, qty, price, order_type="00"):
+        return {"success": True, "data": {"exec_price": 95.0, "exec_qty": qty}, "order_id": "sell_init"}
+
+    broker.sell = types.MethodType(fake_sell, broker)
+
+    prev = Config.TRADING_ENABLED
+    Config.TRADING_ENABLED = True
+    try:
+        results = broker.execute_intents(intents, strategy=strategy, simulate_only=False)
+
+        # quota_initial_moc_done가 True로 설정되고, 체결금액이 quota_reentry_amount에 반영되어야 함
+        assert strategy.state.get("quota_initial_moc_done") is True
+        # proceeds = 95.0 * sold_qty (sold_qty should be 1/4 of 4 = 1.0)
+        assert abs(strategy.state.get("quota_reentry_amount", 0.0) - 95.0) < 1e-6
+        # exec_price 95 > ref_avg*0.9(=90) 이므로 quota_stop_loss_mode는 여전히 True여야 함
+        assert strategy.state.get("quota_stop_loss_mode") is True
+    finally:
+        Config.TRADING_ENABLED = prev
+
+
+def test_decide_buy_sets_quota_on_last_split():
+    broker = _make_broker_without_auth()
+    # Use splits=1 to make per-split amount equal total_amount so qty_int is significant
+    config = {"total_amount": 100, "one_shot_amount": 100, "splits": 1, "market": "overseas"}
+    strategy = InfiniteBuyV2_2(config=config, broker=broker)
+
+    # make cum_buy_amt such that next buy will exhaust the total_amount
+    strategy.state["cum_buy_amt"] = 0.0
+
+    # quote price 10, per_split = 100, qty_int will be 10 -> price*qty_int = 100 meets total_amount
+    quote = {"symbol": "TST", "price": 10}
+    intents = strategy.decide_buy("2026-01-29", quote)
+
+    # after decide_buy the strategy should have a pending quota entry (to be applied on next sell turn)
+    assert strategy.state.get("quota_enter_pending") is True
+    assert strategy.state.get("quota_cycle_count") == 0
+    # quota_reentry_amount should be set to remaining (total_amount - cum_buy_amt)
+    assert abs(strategy.state.get("quota_reentry_amount", 0.0) - 100.0) < 1e-6
+    # intents should be marked as quota_pending (not immediate quota_mode)
+    assert all(it.get("quota_pending") is True for it in intents)

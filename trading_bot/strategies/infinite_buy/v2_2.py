@@ -31,6 +31,8 @@ class InfiniteBuyV2_2(InfiniteBuyBase):
         self.state.setdefault("quota_cycle_count", 0)
         self.state.setdefault("quota_reentry_amount", 0.0)
         self.state.setdefault("quota_final_moc_done", False)
+        # 최초 쿼터 진입 시 1/4 MOC 수행 플래그
+        self.state.setdefault("quota_initial_moc_done", False)
 
     def compute_T(self, cum_buy_amt: float) -> float:
         # 누적 매수금액을 기준으로 T를 계산하고 소수점 둘째 자리에서 올림
@@ -58,6 +60,13 @@ class InfiniteBuyV2_2(InfiniteBuyBase):
         # - 전반전(T < splits/2): 수량이 1이면 단일 주문, >=2이면 floor/ceil로 분할하여
         #   첫 절반은 LOC(현재가), 두번째 절반은 목표 star% 정보 포함
         # - 후반전(T >= splits/2): 전체 수량을 star% 위치에 LOC 단일 주문으로 시도
+        # If broker marked to activate quota on next buy-turn, enter quota mode here
+        if bool(self.state.get("quota_activate_on_next_buy", False)):
+            self.state["quota_stop_loss_mode"] = True
+            self.state["quota_activate_on_next_buy"] = False
+            # do not place any buy orders on this turn (entry-only turn)
+            return []
+
         total_amount = float(self.config.get("total_amount", 0.0))
         if not isinstance(quote, dict):
             return []
@@ -218,16 +227,19 @@ class InfiniteBuyV2_2(InfiniteBuyBase):
         total_amount_cfg = float(self.config.get("total_amount", 0.0))
         cum_buy_state = float(self.state.get("cum_buy_amt", 0.0))
         if total_amount_cfg > 0 and (cum_buy_state + (price * qty_int)) >= total_amount_cfg:
-            # 진입 시 상태 초기화: 재진입 횟수 초기화 및 남은 원금 기록
-            self.state["quota_stop_loss_mode"] = True
+            # 마지막 분할 매수(한 회차의 매수)가 끝난 뒤 쿼터 손절 모드로 진입하도록
+            # 즉시 `quota_stop_loss_mode`를 활성화하지 않고 다음 턴(매도 실행 시)에 진입하도록 표시
+            self.state["quota_enter_pending"] = True
             self.state["quota_cycle_count"] = 0
             # 남은 자금(원금) - 실제 계산은 더 정밀해야 하지만 우선 잔여 원금으로 설정
             remaining = max(0.0, total_amount_cfg - cum_buy_state)
             self.state["quota_reentry_amount"] = remaining
             self.state["quota_final_moc_done"] = False
+            # 최초 진입 시 초기 MOC가 아직 수행되지 않음
+            self.state["quota_initial_moc_done"] = False
             for it in intents:
-                it["quota_mode"] = True
-                it["quota_cycle"] = 0
+                # 표시는 남기되 즉시 재진입 매수로 처리되면 안되므로 'quota_pending' 메타만 추가
+                it["quota_pending"] = True
 
         return intents
 
@@ -255,10 +267,25 @@ class InfiniteBuyV2_2(InfiniteBuyBase):
         sell_qty2 = qty - sell_qty1
 
         intents: List[Dict[str, Any]] = []
-
         # 쿼터 손절 모드 처리
         if bool(self.state.get("quota_stop_loss_mode", False)):
             cycle_done = int(self.state.get("quota_cycle_count", 0))
+            initial_moc_done = bool(self.state.get("quota_initial_moc_done", False))
+            # 최초 진입 시에는 우선 누적수량의 1/4을 MOC로 즉시 매도하고 종료
+            if not initial_moc_done and sell_qty1 > 0:
+                intents.append({
+                    "type": "sell",
+                    "symbol": symbol,
+                    "price": None,
+                    "quantity": sell_qty1,
+                    "order_type": "MOC",
+                    "reason": "quota_initial_moc_sell",
+                    "ref_avg_price": avg_price,
+                    "quota_mode": True,
+                })
+                # mark initial MOC done so it won't repeat
+                self.state["quota_initial_moc_done"] = True
+                return intents
             # 1~10회 재진입 중(또는 그 직후)에는 1/4을 -10% LOC로 손절, 나머지 +10% 지정가
             if cycle_done < 10:
                 if sell_qty1 > 0:
