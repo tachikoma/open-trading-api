@@ -93,10 +93,27 @@ class BacktestReport:
             return
         
         trades_df = pd.DataFrame(results['trades'])
-        
+
+        # 보장된 컬럼 순서: 기존 필드 + 새 필드(gross, commission, tax, total_fees, net_amount)
+        cols = [
+            'date', 'symbol', 'action', 'quantity', 'price', 'avg_buy_price',
+            'gross', 'commission', 'tax', 'total_fees', 'net_amount',
+            'profit', 'profit_pct'
+        ]
+
+        # 존재하지 않는 컬럼은 추가하고 NaN을 0으로 채움
+        for c in cols:
+            if c not in trades_df.columns:
+                trades_df[c] = 0
+
+        # reorder to desired columns, keep any extra columns at the end
+        ordered = [c for c in cols if c in trades_df.columns]
+        extra = [c for c in trades_df.columns if c not in ordered]
+        trades_df = trades_df[ordered + extra]
+
         output_path.parent.mkdir(parents=True, exist_ok=True)
         trades_df.to_csv(output_path, index=False, encoding='utf-8-sig')
-        
+
         print(f"✅ 거래 내역 저장: {output_path}")
     
     @staticmethod
