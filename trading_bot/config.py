@@ -248,6 +248,24 @@ class Config:
     BACKTEST_SLIPPAGE_RATE = 0.001       # 슬리피지 0.1%
     BACKTEST_RESULTS_DIR = Path(__file__).parent / "backtest_results"
 
+    # 실제/시뮬레이션 모두에서 사용할 기본 수수료/세금 설정
+    # 국내 주식 기준: 수수료(편도) 0.015% = 0.00015, 거래세(매도시) 0.20% = 0.002
+    # 환경변수 또는 .env로 오버라이드 가능 (예: COMMISSION_RATE, TRADE_TAX_RATE)
+    try:
+        COMMISSION_RATE = float(os.environ.get("COMMISSION_RATE", _env_vals.get("COMMISSION_RATE", str(0.00015))))
+    except Exception:
+        COMMISSION_RATE = 0.00015
+
+    try:
+        COMMISSION_MIN = int(os.environ.get("COMMISSION_MIN", _env_vals.get("COMMISSION_MIN", "0")))
+    except Exception:
+        COMMISSION_MIN = 0
+
+    try:
+        TRADE_TAX_RATE = float(os.environ.get("TRADE_TAX_RATE", _env_vals.get("TRADE_TAX_RATE", str(0.002))))
+    except Exception:
+        TRADE_TAX_RATE = 0.002
+
     @classmethod
     def validate(cls):
         """설정 유효성 검증

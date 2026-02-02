@@ -18,6 +18,7 @@ from trading_bot.strategies.base_strategy import BaseStrategy
 from trading_bot.backtest.metrics import PerformanceMetrics
 from trading_bot.utils.logger import setup_logger, setup_legacy_logger
 from trading_bot.config import Config
+from trading_bot.utils.fees import calculate_fees_and_taxes
 
 
 class BacktestEngine:
@@ -98,50 +99,54 @@ class BacktestEngine:
         # 슬리피지 적용
         actual_price = self.calculate_slippage(price, action == 'buy')
         
-        # 수수료 계산
-        commission = self.calculate_commission(actual_price, quantity)
-        
+        # 수수료/세금 계산 (백테스트용 유틸 사용)
+        fees = calculate_fees_and_taxes(int(round(actual_price)), int(quantity), side=('buy' if action == 'buy' else 'sell'))
+        commission = fees.get('commission', 0)
+        tax = fees.get('tax', 0)
+        total_fees = fees.get('total_fees', 0)
+        gross = fees.get('gross_amount', actual_price * quantity)
+
         if action == 'buy':
-            total_cost = actual_price * quantity + commission
-            
+            total_cost = gross + total_fees
+
             if total_cost > self.cash:
                 self.logger.warning(f"[{date}] 자금 부족: 필요 {total_cost:,.0f}원, 보유 {self.cash:,.0f}원")
                 return False
-            
-            # 매수 실행
+
+            # 매수 실행 (현금차감)
             self.cash -= total_cost
-            
+
             if symbol not in self.positions:
                 self.positions[symbol] = {'qty': 0, 'avg_price': 0}
-            
-            # 평균 단가 계산
+
+            # 평균 단가 계산 (실제 체결가 사용)
             old_qty = self.positions[symbol]['qty']
             old_avg = self.positions[symbol]['avg_price']
             new_qty = old_qty + quantity
-            new_avg = ((old_avg * old_qty) + (actual_price * quantity)) / new_qty
-            
+            new_avg = ((old_avg * old_qty) + (actual_price * quantity)) / new_qty if new_qty > 0 else 0
+
             self.positions[symbol]['qty'] = new_qty
             self.positions[symbol]['avg_price'] = new_avg
-            
-            self.logger.info(f"[{date}] 매수: {symbol} {quantity}주 @ {actual_price:,.0f}원 (수수료: {commission:,.0f}원)")
-            
+
+            self.logger.info(f"[{date}] 매수: {symbol} {quantity}주 @ {actual_price:,.0f}원 (수수료: {commission:,.0f}원, 세금: {tax:,.0f}원)")
+
         elif action == 'sell':
             if symbol not in self.positions or self.positions[symbol]['qty'] < quantity:
                 self.logger.warning(f"[{date}] 보유 수량 부족: {symbol}")
                 return False
-            
-            # 매도 실행
-            total_revenue = actual_price * quantity - commission
+
+            # 매도 실행 (현금 증가)
+            total_revenue = gross - total_fees
             self.cash += total_revenue
-            
+
             # 포지션 업데이트
             avg_price = self.positions[symbol]['avg_price']
             self.positions[symbol]['qty'] -= quantity
-            
-            # 손익 계산
-            profit = (actual_price - avg_price) * quantity - commission * 2  # 매수/매도 수수료
-            profit_pct = ((actual_price - avg_price) / avg_price) * 100
-            
+
+            # 손익 계산 (NET): 매도 실현액 - 매수 원가
+            profit = total_revenue - (avg_price * quantity)
+            profit_pct = ((actual_price - avg_price) / avg_price) * 100 if avg_price != 0 else 0
+
             # 거래 기록
             trade_record = {
                 'date': date,
@@ -150,15 +155,18 @@ class BacktestEngine:
                 'quantity': quantity,
                 'price': actual_price,
                 'avg_buy_price': avg_price,
+                'gross': gross,
+                'commission': commission,
+                'tax': tax,
+                'total_fees': total_fees,
+                'net_amount': total_revenue,
                 'profit': profit,
                 'profit_pct': profit_pct,
-                'commission': commission * 2
             }
             self.trades.append(trade_record)
-            
-            self.logger.info(f"[{date}] 매도: {symbol} {quantity}주 @ {actual_price:,.0f}원 "
-                           f"(손익: {profit:,.0f}원, {profit_pct:.2f}%)")
-            
+
+            self.logger.info(f"[{date}] 매도: {symbol} {quantity}주 @ {actual_price:,.0f}원 (손익: {profit:,.0f}원, {profit_pct:.2f}%)")
+
             # 포지션 정리
             if self.positions[symbol]['qty'] == 0:
                 del self.positions[symbol]

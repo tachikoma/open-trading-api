@@ -39,6 +39,7 @@ from trading_bot.utils.logger import setup_logger
 from trading_bot.utils.telegram import notify_order, send_telegram_message
 from trading_bot.utils.symbols import format_symbol
 from trading_bot.broker.auth_utils import is_token_expired_response, refresh_token, TokenRefreshError
+from trading_bot.utils.fees import calculate_fees_and_taxes
 
 
 class KISBroker:
@@ -660,7 +661,22 @@ class KISBroker:
                     notify_order("BUY", symbol, qty, price, True, order_id=order_id)
             except Exception:
                 pass
-                return {"success": True, "data": result, "order_id": order_id}
+                # 수수료/세금 계산: 가격이 0(시장가)이면 응답에서 체결가를 시도 추출
+                exec_price = price
+                try:
+                    import pandas as _pd
+                    if exec_price == 0 and isinstance(result, _pd.DataFrame) and not result.empty:
+                        for col in ("ord_unpr", "prc", "exec_prc", "exec_price", "trd_prc", "order_price"):
+                            if col in result.columns:
+                                v = result.iloc[0].get(col)
+                                if v:
+                                    exec_price = int(v)
+                                    break
+                except Exception:
+                    pass
+
+                fees = calculate_fees_and_taxes(exec_price or 0, qty, side="buy")
+                return {"success": True, "data": result, "order_id": order_id, "fees": fees}
         except Exception as e:
             self.logger.error(f"매수 주문 실패 ({symbol}): {e}")
             # 알림 전송 (실패)
@@ -732,7 +748,22 @@ class KISBroker:
                     notify_order("SELL", symbol, qty, price, True, order_id=order_id)
             except Exception:
                 pass
-                return {"success": True, "data": result, "order_id": order_id}
+                # 수수료/세금 계산: 가격이 0(시장가)이면 응답에서 체결가를 시도 추출
+                exec_price = price
+                try:
+                    import pandas as _pd
+                    if exec_price == 0 and isinstance(result, _pd.DataFrame) and not result.empty:
+                        for col in ("ord_unpr", "prc", "exec_prc", "exec_price", "trd_prc", "order_price"):
+                            if col in result.columns:
+                                v = result.iloc[0].get(col)
+                                if v:
+                                    exec_price = int(v)
+                                    break
+                except Exception:
+                    pass
+
+                fees = calculate_fees_and_taxes(exec_price or 0, qty, side="sell")
+                return {"success": True, "data": result, "order_id": order_id, "fees": fees}
         except Exception as e:
             self.logger.error(f"매도 주문 실패 ({symbol}): {e}")
             # 알림 전송 (실패)
