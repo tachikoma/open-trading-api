@@ -153,11 +153,46 @@ class KISBroker:
 
                     if should_retry:
                         self.logger.warning(f"check_result 요청으로 재시도합니다. (시도 {attempt}/{max_retries})")
+                        # 최소한의 요약 정보를 WARNING 레벨로 남겨서
+                        # INFO/ERROR 로그 레벨에서도 원인 파악이 가능하도록 합니다.
+                        try:
+                            if result is None:
+                                self.logger.warning("check_result 요약: 결과가 None입니다.")
+                            else:
+                                try:
+                                    import pandas as _pd
+                                except Exception:
+                                    _pd = None
+
+                                if _pd is not None and isinstance(result, _pd.DataFrame):
+                                    try:
+                                        self.logger.warning(
+                                            f"check_result 요약: DataFrame 빈값={result.empty}, shape={result.shape}"
+                                        )
+                                    except Exception:
+                                        self.logger.warning("check_result 요약: DataFrame (요약 불가)")
+                                elif isinstance(result, (dict, list, tuple)):
+                                    try:
+                                        self.logger.warning(
+                                            f"check_result 요약: payload type={type(result).__name__}, len={len(result) if hasattr(result, '__len__') else 'N/A'}"
+                                        )
+                                    except Exception:
+                                        self.logger.warning("check_result 요약: payload (요약 불가)")
+                                else:
+                                    try:
+                                        self.logger.warning(f"check_result 요약: {str(result)[:200]}")
+                                    except Exception:
+                                        self.logger.warning("check_result 요약: 결과(문자열화 실패)")
+                        except Exception:
+                            # 요약 로깅에서 오류가 발생해도 진행
+                            pass
+
                         try:
                             # 결과가 있을 경우 가능한 상세 응답/헤더를 추출해 로깅
                             self._log_response_details(result, f"check_result 재시도 (시도 {attempt}/{max_retries})")
                         except Exception as _e:
                             self.logger.debug(f"상세 응답 로깅 중 오류: {_e}")
+
                         if attempt < max_retries:
                             time.sleep(delay_sec)
                             continue
@@ -378,6 +413,21 @@ class KISBroker:
 
         return False
     
+    def _check_retry_on_rate_limit_only(self, result, exception) -> bool:
+        """재시도 판정: 오직 rate-limit 또는 토큰만료같은 오류에 대해서만 재시도하도록 제한합니다.
+
+        - 예외가 주어지면 rate-limit 관련 메시지(EGW00201 등)가 있는지 검사
+        - 결과 기반 판정은 항상 재시도하지 않음(빈 결과로 인한 불필요한 재시도 방지)
+        """
+        if exception is not None:
+            msg = str(exception)
+            if "EGW00201" in msg or "초당 거래건수" in msg or "초당 거래건수를 초과" in msg:
+                return True
+            return False
+
+        # 결과가 비어있다고 해서 자동 재시도하지 않음
+        return False
+    
     pass
     
     # ==================== 시세 조회 ====================
@@ -505,7 +555,7 @@ class KISBroker:
                 fund_sttl_icld_yn="N",
                 fncg_amt_auto_rdpt_yn="N",
                 prcs_dvsn="00",
-                check_result=self._check_retry_on_empty_or_rate_limit
+                check_result=self._check_retry_on_rate_limit_only
             )
             return df1, df2
         except Exception as e:
