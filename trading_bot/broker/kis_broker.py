@@ -391,6 +391,9 @@ class KISBroker:
                         self.logger.debug(f"{context} - structured_response_payload: {compact[:2000]}")
                     except Exception:
                         pass
+                except Exception:
+                    # structured JSON 로깅 중 오류가 발생해도 진행
+                    pass
 
                 # 비JSON일 경우 추가 경고 로그를 남겨서 원문 분석이 필요함을 표시
                 if not is_json and status_code is not None and int(status_code) >= 500:
