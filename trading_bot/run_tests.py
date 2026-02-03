@@ -6,6 +6,13 @@ if __name__ == "__main__":
     PROJECT_ROOT = Path(__file__).parent.parent
     sys.path.insert(0, str(PROJECT_ROOT))
 
-    # pytest를 trading_bot 폴더 기준으로 실행
+    # pytest를 trading_bot 폴더 기준으로 실행 (파일 경로를 이 스크립트 기준으로 해석)
     import pytest
-    sys.exit(pytest.main(["-q", "tests/test_quota_lifecycle.py"]))
+    from pathlib import Path
+    tests_dir = Path(__file__).parent / "tests"
+    target = tests_dir / "test_quota_lifecycle.py"
+    if target.exists():
+        sys.exit(pytest.main(["-q", str(target)]))
+    else:
+        # 파일이 없으면 디렉토리 전체를 실행하도록 폴백
+        sys.exit(pytest.main(["-q", str(tests_dir)]))
