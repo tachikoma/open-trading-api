@@ -1430,7 +1430,14 @@ class KISBroker:
                     # 전략 객체가 제공된 경우 상태 갱신 및 거래 기록(기록 함수 호출)을 시도
                     if strategy is not None and ttype == "buy" and fake_res.get("success"):
                         amt = qty * price
-                        strategy.state["cum_buy_amt"] = strategy.state.get("cum_buy_amt", 0.0) + float(amt)
+                        # strategy가 심볼별 누적 함수를 제공하면 사용
+                        try:
+                            if hasattr(strategy, 'add_cum_buy'):
+                                strategy.add_cum_buy(symbol, amt)
+                            else:
+                                strategy.state["cum_buy_amt"] = strategy.state.get("cum_buy_amt", 0.0) + float(amt)
+                        except Exception:
+                            strategy.state["cum_buy_amt"] = strategy.state.get("cum_buy_amt", 0.0) + float(amt)
                         try:
                             strategy.record_trade({"symbol": symbol, "qty": qty, "price": price, "amount": amt, "side": "buy"})
                         except Exception:
@@ -1500,7 +1507,13 @@ class KISBroker:
                 if strategy is not None and isinstance(res, dict) and res.get("success"):
                     if ttype == "buy":
                         amt = qty * price
-                        strategy.state["cum_buy_amt"] = strategy.state.get("cum_buy_amt", 0.0) + float(amt)
+                        try:
+                            if hasattr(strategy, 'add_cum_buy'):
+                                strategy.add_cum_buy(symbol, amt)
+                            else:
+                                strategy.state["cum_buy_amt"] = strategy.state.get("cum_buy_amt", 0.0) + float(amt)
+                        except Exception:
+                            strategy.state["cum_buy_amt"] = strategy.state.get("cum_buy_amt", 0.0) + float(amt)
                         try:
                             strategy.record_trade({"symbol": symbol, "qty": qty, "price": price, "amount": amt, "side": "buy", "order_id": res.get("order_id")})
                         except Exception:

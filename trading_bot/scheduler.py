@@ -45,28 +45,6 @@ class SimpleScheduler:
 
         self.logger.info(f"스케줄러 초기화 완료 (전략 수: {len(strategies)})")
     
-    def is_market_hours(self) -> bool:
-        """
-        장 운영 시간인지 확인
-        
-        Returns:
-            장 운영 시간이면 True
-        """
-        # 한국 시간대 사용
-        kst = pytz.timezone('Asia/Seoul')
-        now = datetime.now(kst)
-        
-        # 주말 체크
-        if now.weekday() >= 5:  # 토요일(5), 일요일(6)
-            return False
-        
-        # 시간 체크 (09:00 ~ 15:30)
-        current_time = now.time()
-        market_open = dt_time(9, 0)
-        market_close = dt_time(15, 30)
-        
-        return market_open <= current_time <= market_close
-
     def _strategy_id(self, strategy: Any) -> str:
         return f"{strategy.__class__.__name__}:{id(strategy)}"
 

@@ -56,30 +56,41 @@ class InfiniteBuyV2_2(InfiniteBuyBase):
         return max(0.0, float(raw))
 
     def decide_buy(self, date, quote: Dict) -> List[Dict[str, Any]]:
-        # v2.2 매수 의도 생성 로직 (정수 수량 분할 처리):
-        # - 설정값 `total_amount`를 `splits`로 나눈 분할당 금액으로 주문 크기 결정
-        # - 실제 주문 가능한 정수 수량(qty_int)을 기준으로 분할
-        # - 전반전(T < splits/2): 수량이 1이면 단일 주문, >=2이면 floor/ceil로 분할하여
-        #   첫 절반은 LOC(현재가), 두번째 절반은 목표 star% 정보 포함
-        # - 후반전(T >= splits/2): 전체 수량을 star% 위치에 LOC 단일 주문으로 시도
-        # If broker marked to activate quota on next buy-turn, enter quota mode here
+        # v2.2 매수 의도 생성 로직 (심볼별 total_amount, splits 기준)
+        # 1) 심볼/가격 먼저 추출
         if bool(self.state.get("quota_activate_on_next_buy", False)):
             self.state["quota_stop_loss_mode"] = True
             self.state["quota_activate_on_next_buy"] = False
             # do not place any buy orders on this turn (entry-only turn)
             return []
 
-        cfg = self.cfg_for(symbol)
-        total_amount = float(cfg.get("total_amount", 0.0))
         if not isinstance(quote, dict):
             return []
         price = float(quote.get("price") or 0.0)
         symbol = quote.get("symbol")
-        if total_amount <= 0 or price <= 0:
+        if symbol is None or price <= 0:
             return []
 
-        cum_buy = float(self.state.get("cum_buy_amt", 0.0))
-        per_split = self.quota(total_amount)
+        # 2) 심볼별 설정 병합
+        cfg = self.cfg_for(symbol)
+        try:
+            total_amount = float(cfg.get("total_amount", 0.0))
+        except Exception:
+            total_amount = 0.0
+        try:
+            splits_cfg = int(cfg.get("splits", self.splits or 40))
+        except Exception:
+            splits_cfg = self.splits or 40
+
+        # per-symbol 규칙 검증: total_amount와 splits는 반드시 필요
+        if total_amount <= 0 or splits_cfg <= 0:
+            # 설정이 없으면 실행하지 않음
+            self.logger.warning(f"{symbol}: total_amount 또는 splits 설정이 유효하지 않습니다. total_amount={total_amount}, splits={splits_cfg}")
+            return []
+
+        cum_buy = float(self.get_cum_buy(symbol))
+        # 분할당 1회 금액: total_amount / splits
+        per_split = float(total_amount) / float(splits_cfg)
         amount = self.ceil2(per_split)
 
         # T 및 목표 퍼센트 계산
@@ -226,16 +237,15 @@ class InfiniteBuyV2_2(InfiniteBuyBase):
                 ],
             })
 
-        # 원금 소진 대응 플래그
-        total_amount_cfg = float(self.config.get("total_amount", 0.0))
-        cum_buy_state = float(self.state.get("cum_buy_amt", 0.0))
-        if total_amount_cfg > 0 and (cum_buy_state + (price * qty_int)) >= total_amount_cfg:
+        # 원금 소진 대응 플래그 (심볼별 total_amount 기준)
+        cum_buy_state = float(self.get_cum_buy(symbol))
+        if total_amount > 0 and (cum_buy_state + (price * qty_int)) >= total_amount:
             # 마지막 분할 매수(한 회차의 매수)가 끝난 뒤 쿼터 손절 모드로 진입하도록
             # 즉시 `quota_stop_loss_mode`를 활성화하지 않고 다음 턴(매도 실행 시)에 진입하도록 표시
             self.state["quota_enter_pending"] = True
             self.state["quota_cycle_count"] = 0
             # 남은 자금(원금) - 실제 계산은 더 정밀해야 하지만 우선 잔여 원금으로 설정
-            remaining = max(0.0, total_amount_cfg - cum_buy_state)
+            remaining = max(0.0, total_amount - cum_buy_state)
             self.state["quota_reentry_amount"] = remaining
             self.state["quota_final_moc_done"] = False
             # 최초 진입 시 초기 MOC가 아직 수행되지 않음
@@ -256,7 +266,7 @@ class InfiniteBuyV2_2(InfiniteBuyBase):
         qty = float(position.get("quantity", 0.0))
         avg_price = float(position.get("avg_price", position.get("price", 0.0)))
         symbol = position.get("symbol")
-        cum_buy = float(position.get("cum_buy_amt", self.state.get("cum_buy_amt", 0.0)))
+        cum_buy = float(position.get("cum_buy_amt", self.get_cum_buy(symbol)))
         if qty <= 0 or avg_price <= 0:
             return []
 

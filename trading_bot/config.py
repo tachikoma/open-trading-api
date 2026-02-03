@@ -57,20 +57,22 @@ class Config:
 
     # 프로젝트 루트 경로
     ROOT_DIR = Path(__file__).parent.parent
+    # .env 파일 파싱 (프로젝트 루트의 .env 우선값으로 사용)
+    _env_path = ROOT_DIR / ".env"
+    _env_vals = _parse_env_file(_env_path)
+    # ENV_MODE: 환경변수 > .env > 기본값('demo')
+    _raw_env_mode = os.environ.get("ENV_MODE", _env_vals.get("ENV_MODE", "demo"))
+    if isinstance(_raw_env_mode, str):
+        ENV_MODE = _raw_env_mode.strip().lower()
+    else:
+        # boolean 등 비문자 입력이 들어오면 안전하게 demo로 설정
+        try:
+            ENV_MODE = str(_raw_env_mode).strip().lower()
+        except Exception:
+            ENV_MODE = "demo"
 
-    # 기본값
-    _DEFAULT_ENV_MODE = "real"
-    _DEFAULT_TRADING_ENABLED = False
-
-    # .env 파일에서 값을 읽음
-    _env_file = ROOT_DIR / ".env"
-    _env_vals = _parse_env_file(_env_file)
-
-    # ENV_MODE: 환경변수 > .env > 기본값
-    ENV_MODE = os.environ.get("ENV_MODE", _env_vals.get("ENV_MODE", _DEFAULT_ENV_MODE))
-
-    # TRADING_ENABLED: 환경변수 > .env > 기본값
-    _raw_trading = os.environ.get("TRADING_ENABLED", _env_vals.get("TRADING_ENABLED", str(_DEFAULT_TRADING_ENABLED)))
+    # TRADING_ENABLED: 환경변수 > .env > 기본값(0)
+    _raw_trading = os.environ.get("TRADING_ENABLED", _env_vals.get("TRADING_ENABLED", "0"))
     if isinstance(_raw_trading, bool):
         TRADING_ENABLED = _raw_trading
     else:
@@ -79,15 +81,11 @@ class Config:
     # 스케줄 설정 (방안 3)
     SCHEDULE_INTERVAL_MINUTES = 5  # 5분마다 전략 실행
 
-    # 거래 시간 설정
-    MARKET_OPEN_TIME = "09:00"
-    MARKET_CLOSE_TIME = "15:30"
-
     # 시장 시간 매핑 (전략별/마켓별 스케줄링에 사용)
     # 필요 시 이 맵을 수정하거나 환경변수 또는 Config로 오버라이드하여 사용하세요.
     MARKET_HOURS = {
         "KRX": {"tz": "Asia/Seoul", "open": "09:00", "close": "15:30", "days": [0, 1, 2, 3, 4]},
-        "NYSE": {"tz": "US/Eastern", "open": "09:30", "close": "16:00", "days": [0, 1, 2, 3, 4]},
+        "NYSE": {"tz": "US/Eastern", "open": "00:30", "close": "16:00", "days": [0, 1, 2, 3, 4]},
     }
 
     # 주문 설정
@@ -145,8 +143,110 @@ class Config:
         {
             "name": "ma_crossover",
             "config": {
+                "markets": "KRX",
                 # 인스턴스별 감시 종목 리스트(없으면 Config.WATCH_LIST 사용)
-                "symbols": ["005930", "035420"],
+                "symbols": [   
+                    "319400", # 현대무벡스
+                    "240810", # 원익IPS
+                    "042700", # 한미반도체
+                    "214450", # 파마리서치
+                    "950160", # 코오롱티슈진
+                    "035900", # JYP Ent.
+                    "005290", # 동진쎄미켐
+                    "476830", # 알지노믹스
+                    "068270", # 셀트리온
+                    "095340", # ISC
+                    "058470", # 리노공업
+                    "039030", # 이오테크닉스
+                    "475830", # 오름테라퓨틱
+                    "140410", # 메지온
+                    "352820", # 하이브
+                    "108490", # 로보티즈
+                    "069500", # KODEX 200
+                    "347850", # 디앤디파마텍
+                    "006800", # 미래에셋증권
+                    "009150", # 삼성전기
+                    "068760", # 셀트리온제약
+                    "257720", # 실리콘투
+                    "010120", # LS ELECTRIC
+                    "0009K0", # 에임드바이오
+                    "237690", # 에스티팜
+                    "357780", # 솔브레인
+                    "090430", # 아모레퍼시픽
+                    "003230", # 삼양식품
+                    "000250", # 삼천당제약
+                    "028300", # HLB
+                    "403870", # HPSP
+                    "214150", # 클래시스
+                    "263750", # 펄어비스
+                    "086520", # 에코프로
+                    "003670", # 포스코퓨처엠
+                    "298380", # 에이비엘바이오
+                    "087010", # 펩트론
+                    "041510", # 에스엠
+                    "035720", # 카카오
+                    "079550", # LIG넥스원
+                    "006260", # LS
+                    "000660", # SK하이닉스
+                    "267260", # HD현대일렉트릭
+                    "006400", # 삼성SDI
+                    "402340", # SK스퀘어
+                    "298040", # 효성중공업
+                    "007660", # 이수페타시스
+                    "000150", # 두산
+                    "454910", # 두산로보틱스
+                    "247540", # 에코프로비엠
+                    "214370", # 케어젠
+                    "445680", # 큐리옥스바이오시스템즈
+                    "035420", # NAVER
+                    "064350", # 현대로템
+                    "039490", # 키움증권
+                    "141080", # 리가켐바이오
+                    "009540", # HD한국조선해양
+                    "000720", # 현대건설
+                    "128940", # 한미약품
+                    "226950", # 올릭스
+                    "051910", # LG화학
+                    "196170", # 알테오젠
+                    "452430", # 사피엔반도체
+                    "377300", # 카카오페이
+                    "360750", # TIGER 미국S&P500
+                    "379800", # KODEX 미국S&P500
+                    "307950", # 현대오토에버
+                    "310210", # 보로노이
+                    "047050", # 포스코인터내셔널
+                    "064400", # LG씨엔에스
+                    "010950", # S-Oil
+                    "133690", # TIGER 미국나스닥100
+                    "011070", # LG이노텍
+                    "145020", # 휴젤
+                    "003490", # 대한항공
+                    "272210", # 한화시스템
+                    "278470", # 에이피알
+                    "005830", # DB손해보험
+                    "411060", # ACE KRX금현물
+                    "018260", # 삼성에스디에스
+                    "015760", # 한국전력
+                    "028260", # 삼성물산
+                    "016360", # 삼성증권
+                    "267250", # HD현대
+                    "042660", # 한화오션
+                    "010130", # 고려아연
+                    "078930", # GS
+                    "021240", # 코웨이
+                    "161390", # 한국타이어앤테크놀로지
+                    "029780", # 삼성카드
+                    "030200", # KT
+                    "005380", # 현대차
+                    "180640", # 한진칼
+                    "326030", # SK바이오팜
+                    "012330", # 현대모비스
+                    "373220", # LG에너지솔루션
+                    "032640", # LG유플러스
+                    "033780", # KT&G
+                    "010140", # 삼성중공업
+                    "088980", # 맥쿼리인프라
+                ],
                 "short_period": 5,
                 "long_period": 20,
             },
@@ -155,13 +255,12 @@ class Config:
             "name": "infinite_buy",
             "config": {
                 "version": "v2.2",
-                # 전체 전역 설정
-                "total_amount": 1000000,
-                "splits": 40,
-                # 종목별 오버라이드 설정(선택적)
-                "per_symbol": {
-                    "005930": {"total_amount": 500000, "splits": 20},
-                    "035420": {"total_amount": 300000, "splits": 30},
+                "markets": "NYSE",
+                # 권장(필수): 심볼별 설정 맵 (키: 티커, 값: {"total_amount":..., "splits": ...})
+                # 예시: 각 티커마다 총투자금(total_amount)과 분할횟수(splits)를 반드시 명시하세요.
+                "symbols": {
+                    "TQQQ": {"total_amount": 300000, "splits": 30},
+                    "SOXL": {"total_amount": 500000, "splits": 20},
                 },
             },
         },
@@ -350,13 +449,38 @@ class Config:
                     except Exception:
                         logger.warning("ma_crossover: short_period/long_period 형식이 올바르지 않습니다: %s/%s", sp, lp)
                 if name == "infinite_buy":
-                    total = cfg.get("total_amount", 0)
+                    # 권장/우선: symbols는 티커->설정(dict) 맵이어야 함
+                    symbols_map = cfg.get("symbols", {}) or {}
+                    has_symbols_map = isinstance(symbols_map, dict) and len(symbols_map) > 0
+                    # legacy: per_symbol(구 버전) 지원 (경고)
                     per_map = cfg.get("per_symbol", {}) or {}
                     has_per = isinstance(per_map, dict) and len(per_map) > 0
-                    try:
-                        if float(total) <= 0 and not has_per:
-                            logger.warning("infinite_buy: 전체 또는 종목별(total_amount/per_symbol) 설정이 필요합니다.")
-                    except Exception:
-                        logger.warning("infinite_buy: total_amount 형식이 잘못되었습니다: %s", total)
+                    total = cfg.get("total_amount", 0)
+
+                    if has_symbols_map:
+                        for sym, entry in symbols_map.items():
+                            if not isinstance(entry, dict):
+                                logger.warning("infinite_buy: symbols[%s] 값은 dict여야 합니다. 현재형: %s", sym, type(entry).__name__)
+                                continue
+                            ta = entry.get("total_amount")
+                            sp = entry.get("splits")
+                            try:
+                                if ta is None or float(ta) <= 0:
+                                    logger.warning("infinite_buy: symbols[%s].total_amount는 양수여야 합니다. 현재: %s", sym, ta)
+                            except Exception:
+                                logger.warning("infinite_buy: symbols[%s].total_amount 형식이 잘못되었습니다: %s", sym, ta)
+                            try:
+                                if sp is None or int(sp) <= 0:
+                                    logger.warning("infinite_buy: symbols[%s].splits는 양의 정수여야 합니다. 현재: %s", sym, sp)
+                            except Exception:
+                                logger.warning("infinite_buy: symbols[%s].splits 형식이 잘못되었습니다: %s", sym, sp)
+                    else:
+                        # backward-compatible validation: 전체(total_amount) 또는 per_symbol 필요
+                        try:
+                            if (float(total) <= 0 if isinstance(total, (int, float, str)) else True) and not has_per:
+                                logger.warning("infinite_buy: 전체(total_amount) 또는 심볼맵(symbols) 또는 종목별(per_symbol) 설정이 필요합니다.")
+                        except Exception:
+                            logger.warning("infinite_buy: total_amount 형식이 잘못되었습니다: %s", total)
+                        logger.warning("infinite_buy: 권장 설정 - 'symbols'에 티커별 'total_amount' 및 'splits'를 지정하세요.")
 
         return True
