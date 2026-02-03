@@ -13,23 +13,26 @@ class InfiniteBuyV3_0(InfiniteBuyBase):
     def __init__(self, config: Dict[str, Any], broker: Any = None):
         super().__init__(config, broker)
 
-    def compute_T(self, cum_buy_amt: float) -> float:
+    def compute_T(self, cum_buy_amt: float, symbol: str = None) -> float:
         # 기본 규칙: one_shot_amount로 나눈 값을 소수점 둘째 자리에서 올림
-        one_shot = float(self.config.get("one_shot_amount", 1000.0))
+        cfg = self.cfg_for(symbol)
+        one_shot = float(cfg.get("one_shot_amount", 1000.0))
         T = (cum_buy_amt) / one_shot if one_shot else 0.0
         return math.ceil(T * 100) / 100.0
 
     def compute_star_percent(self, T: float, symbol: str) -> float:
         # 예시: 구성(config)에서 종목별 base와 factor를 가져와 계산
-        mapping = self.config.get("target_percent_map", {})
-        factor_map = self.config.get("v3_factor_map", {})
+        cfg = self.cfg_for(symbol)
+        mapping = cfg.get("target_percent_map", {})
+        factor_map = cfg.get("v3_factor_map", {})
         base = float(mapping.get(symbol, 10.0))
         factor = float(factor_map.get(symbol, 0.5))
         return max(0.0, base - factor * T)
 
     def decide_buy(self, date, quote) -> List[Dict[str, Any]]:
         # 간단한 스텁: v2.2와 유사하되 종목별 매개변수(map)를 허용
-        total_amount = float(self.config.get("total_amount", 0.0))
+        cfg = self.cfg_for(quote.get("symbol") if isinstance(quote, dict) else None)
+        total_amount = float(cfg.get("total_amount", 0.0))
         price = float(quote.get("price") if isinstance(quote, dict) and quote.get("price") is not None else 0.0)
         symbol = quote.get("symbol") if isinstance(quote, dict) else None
         if total_amount <= 0 or price <= 0:

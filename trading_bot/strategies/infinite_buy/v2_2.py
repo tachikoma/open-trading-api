@@ -34,17 +34,19 @@ class InfiniteBuyV2_2(InfiniteBuyBase):
         # 최초 쿼터 진입 시 1/4 MOC 수행 플래그
         self.state.setdefault("quota_initial_moc_done", False)
 
-    def compute_T(self, cum_buy_amt: float) -> float:
+    def compute_T(self, cum_buy_amt: float, symbol: str = None) -> float:
         # 누적 매수금액을 기준으로 T를 계산하고 소수점 둘째 자리에서 올림
-        one_shot = float(self.config.get("one_shot_amount", 1000.0))
+        cfg = self.cfg_for(symbol)
+        one_shot = float(cfg.get("one_shot_amount", 1000.0))
         T = (cum_buy_amt) / one_shot if one_shot else 0.0
         return math.ceil(T * 100) / 100.0
 
     def compute_star_percent(self, T: float, symbol: str) -> float:
         # 분할수(splits)를 고려한 별퍼센트 계산
         # 공식: 별퍼센트 = 10 - (T/2 * 40 / splits)
+        cfg = self.cfg_for(symbol)
         try:
-            splits = float(self.config.get("splits", 40))
+            splits = float(cfg.get("splits", 40))
             if splits <= 0:
                 splits = 40.0
         except Exception:
@@ -67,7 +69,8 @@ class InfiniteBuyV2_2(InfiniteBuyBase):
             # do not place any buy orders on this turn (entry-only turn)
             return []
 
-        total_amount = float(self.config.get("total_amount", 0.0))
+        cfg = self.cfg_for(symbol)
+        total_amount = float(cfg.get("total_amount", 0.0))
         if not isinstance(quote, dict):
             return []
         price = float(quote.get("price") or 0.0)
@@ -110,7 +113,7 @@ class InfiniteBuyV2_2(InfiniteBuyBase):
             return intents
 
         # splits 설정
-        splits_cfg = int(self.config.get("splits", 40))
+        splits_cfg = int(cfg.get("splits", 40))
 
         intents: List[Dict[str, Any]] = []
         # 쿼터 손절 모드 재진입 처리

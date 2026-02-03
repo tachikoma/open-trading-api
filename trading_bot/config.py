@@ -83,6 +83,13 @@ class Config:
     MARKET_OPEN_TIME = "09:00"
     MARKET_CLOSE_TIME = "15:30"
 
+    # 시장 시간 매핑 (전략별/마켓별 스케줄링에 사용)
+    # 필요 시 이 맵을 수정하거나 환경변수 또는 Config로 오버라이드하여 사용하세요.
+    MARKET_HOURS = {
+        "KRX": {"tz": "Asia/Seoul", "open": "09:00", "close": "15:30", "days": [0, 1, 2, 3, 4]},
+        "NYSE": {"tz": "US/Eastern", "open": "09:30", "close": "16:00", "days": [0, 1, 2, 3, 4]},
+    }
+
     # 주문 설정
     MAX_POSITION_SIZE = 1000000  # 최대 투자 금액 (100만원)
     MAX_ORDER_AMOUNT = 500000    # 1회 최대 주문 금액 (50만원)
@@ -128,7 +135,37 @@ class Config:
     TELEGRAM_TIMEOUT_SEC = int(os.environ.get("TELEGRAM_TIMEOUT_SEC", _env_vals.get("TELEGRAM_TIMEOUT_SEC", "3")))
 
     # 전략 설정
+    # 기존 호환: 문자열 리스트로 전략 이름만 나열할 수 있습니다.
     STRATEGIES_ENABLED = ["ma_crossover", "infinite_buy"]  # 활성화할 전략 목록
+
+    # 권장: 전략별 개별 설정을 포함하는 리스트 형태로 구성하면
+    # 각 전략 인스턴스에 대한 `config`를 전달할 수 있습니다.
+    # 예시 템플릿 (사용 시 STRATEGIES_ENABLED 대신 이 구조로 바꿔 사용):
+    STRATEGIES_CONFIG_TEMPLATE = [
+        {
+            "name": "ma_crossover",
+            "config": {
+                # 인스턴스별 감시 종목 리스트(없으면 Config.WATCH_LIST 사용)
+                "symbols": ["005930", "035420"],
+                "short_period": 5,
+                "long_period": 20,
+            },
+        },
+        {
+            "name": "infinite_buy",
+            "config": {
+                "version": "v2.2",
+                # 전체 전역 설정
+                "total_amount": 1000000,
+                "splits": 40,
+                # 종목별 오버라이드 설정(선택적)
+                "per_symbol": {
+                    "005930": {"total_amount": 500000, "splits": 20},
+                    "035420": {"total_amount": 300000, "splits": 30},
+                },
+            },
+        },
+    ]
 
     # 감시 종목 리스트 (생략 가능, 기존 내용 유지)
     WATCH_LIST = [
@@ -287,5 +324,39 @@ class Config:
                 f"다음 위치에 kis_devlp.yaml 파일을 생성해주세요: {kis_config.parent}/\n"
                 f"프로젝트 루트의 kis_devlp.yaml을 템플릿으로 사용할 수 있습니다."
             )
+
+        # 전략별 권장 설정 검증 (경고 수준)
+        import logging
+        logger = logging.getLogger(__name__)
+
+        # STRATEGIES_CONFIG_TEMPLATE 사용 권장 시 구조 점검
+        if hasattr(cls, "STRATEGIES_CONFIG_TEMPLATE") and isinstance(cls.STRATEGIES_CONFIG_TEMPLATE, list):
+            for entry in cls.STRATEGIES_CONFIG_TEMPLATE:
+                if not isinstance(entry, dict):
+                    logger.warning("STRATEGIES_CONFIG_TEMPLATE 항목은 dict여야 합니다: %s", entry)
+                    continue
+                name = entry.get("name")
+                cfg = entry.get("config", {}) or {}
+                if name == "ma_crossover":
+                    symbols = cfg.get("symbols") or cls.WATCH_LIST
+                    if not symbols:
+                        logger.warning("ma_crossover: 감시 종목(symbols)이 비어있습니다. Config.WATCH_LIST 사용 예정")
+                    # 기간 검증
+                    sp = cfg.get("short_period", cls.MA_SHORT_PERIOD)
+                    lp = cfg.get("long_period", cls.MA_LONG_PERIOD)
+                    try:
+                        if int(sp) <= 0 or int(lp) <= 0:
+                            logger.warning("ma_crossover: short_period/long_period는 양수여야 합니다. 현재: %s/%s", sp, lp)
+                    except Exception:
+                        logger.warning("ma_crossover: short_period/long_period 형식이 올바르지 않습니다: %s/%s", sp, lp)
+                if name == "infinite_buy":
+                    total = cfg.get("total_amount", 0)
+                    per_map = cfg.get("per_symbol", {}) or {}
+                    has_per = isinstance(per_map, dict) and len(per_map) > 0
+                    try:
+                        if float(total) <= 0 and not has_per:
+                            logger.warning("infinite_buy: 전체 또는 종목별(total_amount/per_symbol) 설정이 필요합니다.")
+                    except Exception:
+                        logger.warning("infinite_buy: total_amount 형식이 잘못되었습니다: %s", total)
 
         return True

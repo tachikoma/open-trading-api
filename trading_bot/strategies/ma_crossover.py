@@ -21,9 +21,10 @@ class MovingAverageCrossover(BaseStrategy):
     - 데드크로스(단기이평 < 장기이평): 매도 시그널
     """
     
-    def __init__(self, broker: KISBroker, 
-                 short_period: int = None, 
-                 long_period: int = None):
+    def __init__(self, broker: KISBroker,
+                 short_period: int = None,
+                 long_period: int = None,
+                 symbols: Optional[list] = None):
         """
         Args:
             broker: KISBroker 인스턴스
@@ -34,11 +35,14 @@ class MovingAverageCrossover(BaseStrategy):
         
         self.short_period = short_period or Config.MA_SHORT_PERIOD
         self.long_period = long_period or Config.MA_LONG_PERIOD
-        
+
+        # 인스턴스별 감시 종목 리스트: 전달된 symbols 우선, 아니면 전역 Config.WATCH_LIST 사용
+        self.watch_list = symbols or Config.WATCH_LIST
+
         # 이전 시그널 상태 저장 (골든크로스/데드크로스 감지용)
         self.prev_signals = {}
-        
-        self.logger.info(f"이동평균 설정: 단기={self.short_period}일, 장기={self.long_period}일")
+
+        self.logger.info(f"이동평균 설정: 단기={self.short_period}일, 장기={self.long_period}일, symbols={len(self.watch_list)}개")
     
     def analyze_data(self, symbol: str, data, debug: bool = False):
         """
@@ -271,8 +275,8 @@ class MovingAverageCrossover(BaseStrategy):
         self.logger.info("이동평균 교차 전략 실행")
         self.logger.info("=" * 50)
         
-        # 감시 종목 순회
-        for symbol in Config.WATCH_LIST:
+        # 감시 종목 순회 (인스턴스별 watch_list 사용)
+        for symbol in self.watch_list:
             try:
                 signal = self.get_signal(symbol)
                 

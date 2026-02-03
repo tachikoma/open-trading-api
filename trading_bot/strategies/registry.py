@@ -36,6 +36,7 @@ def _create_ma_crossover(config: Dict[str, Any], broker: Any):
         broker=broker,
         short_period=config.get("short_period"),
         long_period=config.get("long_period"),
+        symbols=config.get("symbols"),
     )
 
 

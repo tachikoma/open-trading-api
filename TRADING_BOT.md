@@ -226,6 +226,46 @@ TRADING_ENABLED=true
 
 참고: `.env.sample`은 저장소에 커밋해도 안전한 예시 파일입니다. 실제 운영값(특히 API 키 등 민감정보)은 `.env`에 두고 커밋하지 마세요.
 
+## 전략 템플릿 사용: `STRATEGIES_CONFIG_TEMPLATE`
+
+`trading_bot/config.py`에서 전략별 설정을 한 곳에서 관리하려면 `STRATEGIES_CONFIG_TEMPLATE`을 사용할 수 있습니다.
+이 템플릿은 전략 이름과 해당 전략에 전달할 `config` 딕셔너리를 포함하는 리스트입니다.
+
+예시:
+
+```python
+STRATEGIES_CONFIG_TEMPLATE = [
+   {
+      "name": "ma_crossover",
+      "config": {
+         "symbols": ["005930", "035420"],
+         "short_period": 5,
+         "long_period": 20,
+      },
+   },
+   {
+      "name": "infinite_buy",
+      "config": {
+         "version": "v2.2",
+         "total_amount": 1000000,
+         "splits": 40,
+         "per_symbol": {
+            "005930": {"total_amount": 500000, "splits": 20},
+         },
+      },
+   },
+]
+```
+
+동작 방식:
+- `run_bot.py`는 시작 시 `Config.STRATEGIES_CONFIG_TEMPLATE`이 존재하면 이를 `Config.STRATEGIES_ENABLED`로 자동 복사하여 메인에서 템플릿을 사용해 전략을 초기화합니다.
+- 템플릿이 비어있거나 없으면 기존 `Config.STRATEGIES_ENABLED` (문자열 리스트) 방식이 그대로 동작합니다.
+
+사용 팁:
+- `ma_crossover`는 `symbols` 키로 인스턴스별 감시 종목을 받을 수 있습니다(기본값: `Config.WATCH_LIST`).
+- `infinite_buy`는 전역 설정(`total_amount`, `splits` 등)과 `per_symbol` 오버라이드를 병합해서 사용합니다.
+- 템플릿 사용 시 각 전략의 `config` 구조에 맞게 키를 채워 주세요.
+
 ### 백테스트 결과
 ```
 trading_bot/backtest_results/    # 백테스트 결과 저장 (.gitignore)

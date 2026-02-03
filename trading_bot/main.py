@@ -45,7 +45,15 @@ def main():
         
         # 전략 초기화 (동적 레지스트리 사용)
         logger.info("전략 초기화 중...")
-        strategies = load_enabled_strategies(Config.STRATEGIES_ENABLED, broker)
+        # 우선순위: Config.STRATEGIES_CONFIG_TEMPLATE (권장 템플릿) -> Config.STRATEGIES_ENABLED (기존 호환)
+        strategies_source = None
+        if hasattr(Config, "STRATEGIES_CONFIG_TEMPLATE") and isinstance(Config.STRATEGIES_CONFIG_TEMPLATE, list) and len(Config.STRATEGIES_CONFIG_TEMPLATE) > 0:
+            logger.info("STRATEGIES_CONFIG_TEMPLATE 사용하여 전략 로드")
+            strategies_source = Config.STRATEGIES_CONFIG_TEMPLATE
+        else:
+            strategies_source = Config.STRATEGIES_ENABLED
+
+        strategies = load_enabled_strategies(strategies_source, broker)
         
         # 스케줄러 초기화
         logger.info("스케줄러 초기화 중...")

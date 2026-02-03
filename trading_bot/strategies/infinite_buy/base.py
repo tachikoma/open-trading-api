@@ -25,6 +25,23 @@ class InfiniteBuyBase(ABC):
         # 전략 상태 저장소 (누적 매수금 등 사용자 정의 상태 보관)
         self.state: Dict[str, Any] = {}
 
+    def cfg_for(self, symbol: str) -> Dict[str, Any]:
+        """주어진 `symbol`에 대해 전역 설정(self.config)과 `per_symbol` 오버라이드를 병합한 딕셔너리를 반환합니다.
+
+        사용 예:
+            cfg = self.cfg_for(symbol)
+            total_amount = float(cfg.get("total_amount", 0.0))
+        """
+        base = dict(self.config) if isinstance(self.config, dict) else {}
+        per_map = base.get("per_symbol") or {}
+        try:
+            overrides = per_map.get(symbol, {}) if isinstance(per_map, dict) else {}
+        except Exception:
+            overrides = {}
+        merged = dict(base)
+        merged.update(overrides or {})
+        return merged
+
     @staticmethod
     def ceil2(value: float) -> float:
         """소수점 둘째 자리에서 올림: ceil(value * 100) / 100
@@ -40,7 +57,7 @@ class InfiniteBuyBase(ABC):
         return float(total_amount) / float(self.splits)
 
     @abstractmethod
-    def compute_T(self, cum_buy_amt: float) -> float:
+    def compute_T(self, cum_buy_amt: float, symbol: str = None) -> float:
         """누적 매수금액(`cum_buy_amt`)으로부터 T를 계산합니다.
 
         반환값은 버전별 규칙(예: 반올림)을 적용한 실수형입니다.
