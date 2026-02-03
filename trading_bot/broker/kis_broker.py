@@ -81,6 +81,80 @@ class KISBroker:
 
             # KIS 인증 수행 (토큰 자동 재발급)
             ka.auth(svr=svr)
+            # --- monkey-patch: examples_user의 printError 출력이 stdout으로만 가는 문제를 보정
+            # APIResp.printError / APIRespError.printError를 덮어써서
+            # print() 대신 broker의 logger로 기록하도록 합니다.
+            try:
+                def _print_error_to_logger(self_resp, url=""):
+                    # 안전하게 상태코드와 본문을 추출
+                    try:
+                        status_raw = getattr(self_resp, "status_code", None)
+                        try:
+                            status = int(status_raw) if status_raw is not None else None
+                        except Exception:
+                            status = None
+                        body = None
+                        if hasattr(self_resp, "error_text"):
+                            body = getattr(self_resp, "error_text")
+                        elif hasattr(self_resp, "getErrorMessage"):
+                            try:
+                                body = self_resp.getErrorMessage()
+                            except Exception:
+                                body = None
+                    except Exception:
+                        status, body = None, None
+
+                    # 로깅 정책: 2xx 무시, 3xx DEBUG, 4xx WARNING, 5xx WARNING
+                    try:
+                        if status is not None and 200 <= status < 300:
+                            # 정상 응답: 기본적으로 로깅하지 않음
+                            return
+                        elif status is not None and 300 <= status < 400:
+                            self.logger.debug(f"API redirect {status} - body (truncated): {str(body)[:1000]}")
+                        elif status is not None and 400 <= status < 500:
+                            self.logger.warning(f"API client error {status} - body (truncated): {str(body)[:2000]}")
+                        elif status is not None and status >= 500:
+                            self.logger.warning(f"API server error {status} - body (truncated): {str(body)[:2000]}")
+                        else:
+                            # 상태 코드 정보가 없거나 비정형 응답
+                            self.logger.info(f"API error (unknown status) - body (truncated): {str(body)[:1000]}")
+                    except Exception:
+                        try:
+                            self.logger.warning("API error (failed to format body)")
+                        except Exception:
+                            pass
+
+                    # 구조화된 페이로드는 항상 debug로 남김 (수집기/파서용)
+                    try:
+                        payload = {
+                            "context": "APIResp.printError",
+                            "http_status": status,
+                            "http_body_truncated": (str(body)[:5000] if body is not None else None),
+                        }
+                        try:
+                            self.logger.debug("structured_response", extra={"json_payload": payload})
+                        except Exception:
+                            import json as _json
+                            try:
+                                self.logger.debug(f"structured_response_payload: {_json.dumps(payload, ensure_ascii=False)[:2000]}")
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+
+                if hasattr(ka, "APIResp"):
+                    try:
+                        ka.APIResp.printError = _print_error_to_logger
+                    except Exception:
+                        pass
+                if hasattr(ka, "APIRespError"):
+                    try:
+                        ka.APIRespError.printError = _print_error_to_logger
+                    except Exception:
+                        pass
+            except Exception:
+                # monkey-patch가 실패해도 인증 흐름에는 영향 없도록 무시
+                self.logger.debug("printError monkey-patch 실패")
             
             # 환경 정보 가져오기
             trenv = ka.getTREnv()
