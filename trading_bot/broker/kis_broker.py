@@ -428,6 +428,32 @@ class KISBroker:
 
         # 결과가 비어있다고 해서 자동 재시도하지 않음
         return False
+
+    def _format_order_response(self, success: bool, result, qty: int = None, price: int = None,
+                               order_id: str = None, side: str = None, fees: dict = None, message: str = None) -> Dict:
+        """
+        주문 응답을 일관된 dict 포맷으로 반환합니다.
+
+        반환 키(하위 호환 유지):
+          - success: bool
+          - side: 'buy'|'sell'|None
+          - data: 원본 응답 객체
+          - order_id: 주문 아이디(가능할 경우)
+          - fees: 수수료/세금 계산 결과 dict (가능할 경우)
+          - message: 에러 또는 상태 메시지
+        """
+        payload = {
+            "success": bool(success),
+            "side": side,
+            "data": result,
+            "order_id": order_id,
+            "fees": fees,
+            "message": message,
+        }
+
+        # 하위호환: 일부 호출부에서 직접 result.get('success') / result.get('fees') 등을 사용하므로
+        # 동일한 접근이 가능하도록 dict 형태로 반환
+        return payload
     
     pass
     
@@ -614,7 +640,7 @@ class KISBroker:
         """
         if not Config.TRADING_ENABLED:
             self.logger.warning(f"[DRY RUN] 매수 주문: {symbol}, 수량: {qty}, 가격: {price}")
-            return {"success": False, "message": "TRADING_ENABLED=False"}
+            return self._format_order_response(False, None, qty=qty, price=price, side="buy", message="TRADING_ENABLED=False")
         
         try:
             result = self._call_with_retry(
@@ -676,7 +702,7 @@ class KISBroker:
                     pass
 
                 fees = calculate_fees_and_taxes(exec_price or 0, qty, side="buy")
-                return {"success": True, "data": result, "order_id": order_id, "fees": fees}
+                return self._format_order_response(True, result, qty=qty, price=exec_price or price, order_id=order_id, side="buy", fees=fees)
         except Exception as e:
             self.logger.error(f"매수 주문 실패 ({symbol}): {e}")
             # 알림 전송 (실패)
@@ -684,7 +710,7 @@ class KISBroker:
                 notify_order("BUY", symbol, qty, price, False, message=str(e))
             except Exception:
                 pass
-            return {"success": False, "message": str(e)}
+            return self._format_order_response(False, None, qty=qty, price=price, side="buy", message=str(e))
     
     def sell(self, symbol: str, qty: int, price: int = 0, order_type: str = "00") -> Optional[Dict]:
         """
@@ -701,7 +727,7 @@ class KISBroker:
         """
         if not Config.TRADING_ENABLED:
             self.logger.warning(f"[DRY RUN] 매도 주문: {symbol}, 수량: {qty}, 가격: {price}")
-            return {"success": False, "message": "TRADING_ENABLED=False"}
+            return self._format_order_response(False, None, qty=qty, price=price, side="sell", message="TRADING_ENABLED=False")
         
         try:
             result = self._call_with_retry(
@@ -763,7 +789,7 @@ class KISBroker:
                     pass
 
                 fees = calculate_fees_and_taxes(exec_price or 0, qty, side="sell")
-                return {"success": True, "data": result, "order_id": order_id, "fees": fees}
+                return self._format_order_response(True, result, qty=qty, price=exec_price or price, order_id=order_id, side="sell", fees=fees)
         except Exception as e:
             self.logger.error(f"매도 주문 실패 ({symbol}): {e}")
             # 알림 전송 (실패)
@@ -771,7 +797,7 @@ class KISBroker:
                 notify_order("SELL", symbol, qty, price, False, message=str(e))
             except Exception:
                 pass
-            return {"success": False, "message": str(e)}
+            return self._format_order_response(False, None, qty=qty, price=price, side="sell", message=str(e))
     
     def cancel_order(self, order_no: str, qty: int, symbol: str, order_type: str) -> Optional[Dict]:
         """
@@ -788,7 +814,7 @@ class KISBroker:
         """
         if not Config.TRADING_ENABLED:
             self.logger.warning(f"[DRY RUN] 주문 취소: {order_no}")
-            return {"success": False, "message": "TRADING_ENABLED=False"}
+            return self._format_order_response(False, None, side="cancel", message="TRADING_ENABLED=False")
         
         try:
             result = self._call_with_retry(
@@ -807,7 +833,7 @@ class KISBroker:
             )
             
             self.logger.info(f"주문 취소 완료: {order_no}")
-            return {"success": True, "data": result}
+            return self._format_order_response(True, result, side="cancel", order_id=order_no)
         except Exception as e:
             self.logger.error(f"주문 취소 실패 ({order_no}): {e}")
-            return {"success": False, "message": str(e)}
+            return self._format_order_response(False, None, side="cancel", message=str(e))

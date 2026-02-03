@@ -340,7 +340,9 @@ class MovingAverageCrossover(BaseStrategy):
                 fees_info = result.get('fees') or calculate_fees_and_taxes(current_price, qty, side="buy")
                 self.logger.info(f"[{format_symbol(symbol)}] 매수 성공 - 수수료: {fees_info['commission']}, 세금: {fees_info['tax']}, 순투자금액: {-fees_info['net_amount']}")
             else:
-                self.logger.error(f"[{format_symbol(symbol)}] 매수 실패: {result.get('message')}")
+                # result가 None 이거나 dict가 아닐 수 있으므로 안전하게 메시지 추출
+                message = result.get('message') if isinstance(result, dict) and result.get('message') is not None else str(result)
+                self.logger.error(f"[{format_symbol(symbol)}] 매수 실패: {message}")
 
         except Exception as e:
             self.logger.error(f"[{format_symbol(symbol)}] 매수 실행 중 오류: {e}")
@@ -389,7 +391,9 @@ class MovingAverageCrossover(BaseStrategy):
                 fees_info = result.get('fees') or calculate_fees_and_taxes(current_price, qty, side="sell")
                 self.logger.info(f"[{format_symbol(symbol)}] 매도 성공 - 수수료: {fees_info['commission']}, 세금: {fees_info['tax']}, 순회수익: {fees_info['net_amount']}")
             else:
-                self.logger.error(f"[{format_symbol(symbol)}] 매도 실패: {result.get('message')}")
+                # result가 None 이거나 dict가 아닐 수 있으므로 안전하게 메시지 추출
+                message = result.get('message') if isinstance(result, dict) and result.get('message') is not None else str(result)
+                self.logger.error(f"[{format_symbol(symbol)}] 매도 실패: {message}")
                 
         except Exception as e:
             self.logger.error(f"[{format_symbol(symbol)}] 매도 실행 중 오류: {e}")
