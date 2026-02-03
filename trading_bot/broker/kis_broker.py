@@ -7,6 +7,7 @@ KIS Broker 래퍼 클래스
 import sys
 from pathlib import Path
 from typing import Optional, Dict, Any, Tuple
+import threading
 import pandas as pd
 import time
 import os
@@ -61,6 +62,8 @@ class KISBroker:
         """
         self.logger = setup_logger("KISBroker", Config.LOG_DIR, Config.LOG_LEVEL)
         self.env_mode = env_mode
+        # thread-local storage for last API error payload captured by monkey-patch
+        self._local = threading.local()
         
         # KIS 인증 초기화
         self._init_auth()
@@ -139,6 +142,23 @@ class KISBroker:
                                 self.logger.debug(f"structured_response_payload: {_json.dumps(payload, ensure_ascii=False)[:2000]}")
                             except Exception:
                                 pass
+
+                        # mark this response as logged to avoid duplicate logging later
+                        try:
+                            try:
+                                setattr(self_resp, "_logged_by_kisbroker", True)
+                            except Exception:
+                                pass
+                            # store compact payload in thread-local for later attachment to returned DataFrame
+                            try:
+                                self._local.last_error_payload = payload
+                            except Exception:
+                                try:
+                                    self._local.__dict__["last_error_payload"] = payload
+                                except Exception:
+                                    pass
+                        except Exception:
+                            pass
                     except Exception:
                         pass
 
@@ -196,6 +216,58 @@ class KISBroker:
                     self.logger.warning(f"사전 토큰 검사/재발급 중 오류: {pre_e}")
 
                 result = func(*args, **kwargs)
+
+                # If a recent API error payload was captured by the monkey-patch,
+                # attach it to empty DataFrame results so callers can inspect the cause.
+                try:
+                    payload = getattr(self._local, "last_error_payload", None)
+                    if payload is not None:
+                        try:
+                            import pandas as _pd
+                        except Exception:
+                            _pd = None
+
+                        try:
+                            if _pd is not None and isinstance(result, _pd.DataFrame) and result.empty:
+                                try:
+                                    # use DataFrame.attrs for storing metadata
+                                    result.attrs["error_payload"] = payload
+                                except Exception:
+                                    pass
+                                try:
+                                    delattr(self._local, "last_error_payload")
+                                except Exception:
+                                    try:
+                                        self._local.last_error_payload = None
+                                    except Exception:
+                                        pass
+                        except Exception:
+                            # result may be non-DataFrame or partially structured; handle tuples/lists
+                            try:
+                                if isinstance(result, (list, tuple)):
+                                    changed = False
+                                    for r in result:
+                                        try:
+                                            if _pd is not None and isinstance(r, _pd.DataFrame) and r.empty:
+                                                try:
+                                                    r.attrs["error_payload"] = payload
+                                                    changed = True
+                                                except Exception:
+                                                    pass
+                                        except Exception:
+                                            continue
+                                    if changed:
+                                        try:
+                                            delattr(self._local, "last_error_payload")
+                                        except Exception:
+                                            try:
+                                                self._local.last_error_payload = None
+                                            except Exception:
+                                                pass
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
 
                 # 결과 기반 토큰 만료 검사: API가 HTTP 200으로 응답하면서
                 # body에 만료 코드(EGW00123 등)를 담아오는 경우를 감지
@@ -348,6 +420,17 @@ class KISBroker:
                 self.logger.debug(f"{context}: no response object")
                 return
 
+            # monkey-patch에서 이미 로깅한 응답이면 중복 로깅을 방지
+            try:
+                if getattr(obj, "_logged_by_kisbroker", False):
+                    try:
+                        self.logger.debug(f"{context}: response already logged by KISBroker, skipping duplicate")
+                    except Exception:
+                        pass
+                    return
+            except Exception:
+                pass
+
             # examples_user의 APIResp 타입(유사 객체)
             if hasattr(obj, "getHeader") and hasattr(obj, "getBody"):
                 try:
@@ -408,10 +491,17 @@ class KISBroker:
                         }
                         # WARNING 수준으로 본문을 남김(500 경우 조사에 용이)
                         try:
-                            if status_code is not None and int(status_code) >= 500:
-                                self.logger.warning(f"{context} - HTTP {status_code} body (truncated 5k): {str(body_text)[:5000]}")
-                            else:
-                                self.logger.info(f"{context} - API error: {str(body_text)[:1000]}")
+                            already_logged = False
+                            try:
+                                already_logged = bool(getattr(obj, "_logged_by_kisbroker", False))
+                            except Exception:
+                                already_logged = False
+
+                            if not already_logged:
+                                if status_code is not None and int(status_code) >= 500:
+                                    self.logger.warning(f"{context} - HTTP {status_code} body (truncated 5k): {str(body_text)[:5000]}")
+                                else:
+                                    self.logger.info(f"{context} - API error: {str(body_text)[:1000]}")
                         except Exception:
                             pass
 
@@ -429,9 +519,15 @@ class KISBroker:
                             except Exception:
                                 pass
 
-                        # 500대면 추가 경고
+                        # 500대면 추가 경고 (중복 로깅 방지)
                         try:
-                            if status_code is not None and int(status_code) >= 500:
+                            already_logged = False
+                            try:
+                                already_logged = bool(getattr(obj, "_logged_by_kisbroker", False))
+                            except Exception:
+                                already_logged = False
+
+                            if status_code is not None and int(status_code) >= 500 and not already_logged:
                                 self.logger.warning(f"{context} - 비JSON 500 응답(원문 일부): {str(body_text)[:2000]}")
                         except Exception:
                             pass
