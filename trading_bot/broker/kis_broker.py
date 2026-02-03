@@ -375,11 +375,20 @@ class KISBroker:
 
                 # structured JSON 로그는 항상 남김(파서/로그 수집기용)
                 try:
-                    self.logger.debug("structured_response", extra={"json_payload": payload})
-                except Exception:
-                    # 로거가 extra를 지원하지 않을 경우 대비하여 대체 로그
+                    # structured payload를 extra로 남기고, 포맷터가 extra를 사용하지 않을 경우
+                    # 콘솔/파일에 표시되도록 메시지 문자열로도 남깁니다.
                     try:
-                        self.logger.debug(f"{context} - structured_response_payload: {str(payload)[:2000]}")
+                        self.logger.debug("structured_response", extra={"json_payload": payload})
+                    except Exception:
+                        pass
+                    try:
+                        import json as _json
+                        compact = _json.dumps(payload, ensure_ascii=False)
+                    except Exception:
+                        compact = str(payload)
+                    # 길이가 너무 길면 잘라서 남김
+                    try:
+                        self.logger.debug(f"{context} - structured_response_payload: {compact[:2000]}")
                     except Exception:
                         pass
 
