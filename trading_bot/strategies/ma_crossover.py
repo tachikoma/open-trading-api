@@ -10,6 +10,7 @@ from trading_bot.strategies.base_strategy import BaseStrategy
 from trading_bot.broker import KISBroker
 from trading_bot.config import Config
 from trading_bot.utils.symbols import format_symbol
+from trading_bot.utils.fees import calculate_fees_and_taxes
 
 
 class MovingAverageCrossover(BaseStrategy):
@@ -316,11 +317,19 @@ class MovingAverageCrossover(BaseStrategy):
             # 포지션 크기 계산 (설정된 최대 금액과 가용 현금 중 작은 값)
             invest_amount = min(Config.MAX_POSITION_SIZE, available_cash)
             
-            # 매수 수량 계산
+            # 매수 수량 계산: 수수료(및 최소수수료)를 고려하여 실제로 투자 가능한 수량으로 보정
             qty = invest_amount // current_price
-            
+
+            # 조정 루프: 수량이 0이거나 수수료 포함 금액이 투자금액을 초과하면 수량 감소
+            while qty > 0:
+                est = calculate_fees_and_taxes(current_price, qty, side="buy")
+                gross_plus_fee = est['gross_amount'] + est['total_fees']
+                if gross_plus_fee <= invest_amount:
+                    break
+                qty -= 1
+
             if qty == 0:
-                self.logger.warning(f"[{format_symbol(symbol)}] 매수 수량 0 (금액 부족)")
+                self.logger.warning(f"[{format_symbol(symbol)}] 매수 수량 0 (금액 및 수수료 고려 시 부족)")
                 return
             
             # 매수 주문
@@ -328,9 +337,12 @@ class MovingAverageCrossover(BaseStrategy):
             result = self.broker.buy(symbol, qty, current_price, order_type="00")
             
             if result and result.get('success'):
-                self.logger.info(f"[{format_symbol(symbol)}] 매수 성공")
+                fees_info = result.get('fees') or calculate_fees_and_taxes(current_price, qty, side="buy")
+                self.logger.info(f"[{format_symbol(symbol)}] 매수 성공 - 수수료: {fees_info['commission']}, 세금: {fees_info['tax']}, 순투자금액: {-fees_info['net_amount']}")
             else:
-                self.logger.error(f"[{format_symbol(symbol)}] 매수 실패: {result.get('message')}")
+                # result가 None 이거나 dict가 아닐 수 있으므로 안전하게 메시지 추출
+                message = result.get('message') if isinstance(result, dict) and result.get('message') is not None else str(result)
+                self.logger.error(f"[{format_symbol(symbol)}] 매수 실패: {message}")
 
         except Exception as e:
             self.logger.error(f"[{format_symbol(symbol)}] 매수 실행 중 오류: {e}")
@@ -376,9 +388,12 @@ class MovingAverageCrossover(BaseStrategy):
             result = self.broker.sell(symbol, qty, current_price, order_type="00")
             
             if result and result.get('success'):
-                self.logger.info(f"[{format_symbol(symbol)}] 매도 성공")
+                fees_info = result.get('fees') or calculate_fees_and_taxes(current_price, qty, side="sell")
+                self.logger.info(f"[{format_symbol(symbol)}] 매도 성공 - 수수료: {fees_info['commission']}, 세금: {fees_info['tax']}, 순회수익: {fees_info['net_amount']}")
             else:
-                self.logger.error(f"[{format_symbol(symbol)}] 매도 실패: {result.get('message')}")
+                # result가 None 이거나 dict가 아닐 수 있으므로 안전하게 메시지 추출
+                message = result.get('message') if isinstance(result, dict) and result.get('message') is not None else str(result)
+                self.logger.error(f"[{format_symbol(symbol)}] 매도 실패: {message}")
                 
         except Exception as e:
             self.logger.error(f"[{format_symbol(symbol)}] 매도 실행 중 오류: {e}")

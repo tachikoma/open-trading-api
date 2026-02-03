@@ -7,6 +7,7 @@ KIS Broker 래퍼 클래스
 import sys
 from pathlib import Path
 from typing import List, Optional, Dict, Any, Tuple
+import threading
 import pandas as pd
 import time
 import importlib.util
@@ -39,6 +40,7 @@ from trading_bot.utils.logger import setup_logger
 from trading_bot.utils.telegram import notify_order, send_telegram_message
 from trading_bot.utils.symbols import format_symbol
 from trading_bot.broker.auth_utils import is_token_expired_response, refresh_token, TokenRefreshError
+from trading_bot.utils.fees import calculate_fees_and_taxes
 
 
 class KISBroker:
@@ -60,6 +62,8 @@ class KISBroker:
         """
         self.logger = setup_logger("KISBroker", Config.LOG_DIR, Config.LOG_LEVEL)
         self.env_mode = env_mode
+        # thread-local storage for last API error payload captured by monkey-patch
+        self._local = threading.local()
         
         # KIS 인증 초기화
         self._init_auth()
@@ -80,6 +84,97 @@ class KISBroker:
 
             # KIS 인증 수행 (토큰 자동 재발급)
             ka.auth(svr=svr)
+            # --- monkey-patch: examples_user의 printError 출력이 stdout으로만 가는 문제를 보정
+            # APIResp.printError / APIRespError.printError를 덮어써서
+            # print() 대신 broker의 logger로 기록하도록 합니다.
+            try:
+                def _print_error_to_logger(self_resp, url=""):
+                    # 안전하게 상태코드와 본문을 추출
+                    try:
+                        status_raw = getattr(self_resp, "status_code", None)
+                        try:
+                            status = int(status_raw) if status_raw is not None else None
+                        except Exception:
+                            status = None
+                        body = None
+                        if hasattr(self_resp, "error_text"):
+                            body = getattr(self_resp, "error_text")
+                        elif hasattr(self_resp, "getErrorMessage"):
+                            try:
+                                body = self_resp.getErrorMessage()
+                            except Exception:
+                                body = None
+                    except Exception:
+                        status, body = None, None
+
+                    # 로깅 정책: 2xx 무시, 3xx DEBUG, 4xx WARNING, 5xx WARNING
+                    try:
+                        if status is not None and 200 <= status < 300:
+                            # 정상 응답: 기본적으로 로깅하지 않음
+                            return
+                        elif status is not None and 300 <= status < 400:
+                            self.logger.debug(f"API redirect {status} - body (truncated): {str(body)[:1000]}")
+                        elif status is not None and 400 <= status < 500:
+                            self.logger.warning(f"API client error {status} - body (truncated): {str(body)[:2000]}")
+                        elif status is not None and status >= 500:
+                            self.logger.warning(f"API server error {status} - body (truncated): {str(body)[:2000]}")
+                        else:
+                            # 상태 코드 정보가 없거나 비정형 응답
+                            self.logger.info(f"API error (unknown status) - body (truncated): {str(body)[:1000]}")
+                    except Exception:
+                        try:
+                            self.logger.warning("API error (failed to format body)")
+                        except Exception:
+                            pass
+
+                    # 구조화된 페이로드는 항상 debug로 남김 (수집기/파서용)
+                    try:
+                        payload = {
+                            "context": "APIResp.printError",
+                            "http_status": status,
+                            "http_body_truncated": (str(body)[:5000] if body is not None else None),
+                        }
+                        try:
+                            self.logger.debug("structured_response", extra={"json_payload": payload})
+                        except Exception:
+                            import json as _json
+                            try:
+                                self.logger.debug(f"structured_response_payload: {_json.dumps(payload, ensure_ascii=False)[:2000]}")
+                            except Exception:
+                                pass
+
+                        # mark this response as logged to avoid duplicate logging later
+                        try:
+                            try:
+                                setattr(self_resp, "_logged_by_kisbroker", True)
+                            except Exception:
+                                pass
+                            # store compact payload in thread-local for later attachment to returned DataFrame
+                            try:
+                                self._local.last_error_payload = payload
+                            except Exception:
+                                try:
+                                    self._local.__dict__["last_error_payload"] = payload
+                                except Exception:
+                                    pass
+                        except Exception:
+                            pass
+                    except Exception:
+                        pass
+
+                if hasattr(ka, "APIResp"):
+                    try:
+                        ka.APIResp.printError = _print_error_to_logger
+                    except Exception:
+                        pass
+                if hasattr(ka, "APIRespError"):
+                    try:
+                        ka.APIRespError.printError = _print_error_to_logger
+                    except Exception:
+                        pass
+            except Exception:
+                # monkey-patch가 실패해도 인증 흐름에는 영향 없도록 무시
+                self.logger.debug("printError monkey-patch 실패")
             
             # 환경 정보 가져오기
             trenv = ka.getTREnv()
@@ -122,6 +217,58 @@ class KISBroker:
 
                 result = func(*args, **kwargs)
 
+                # If a recent API error payload was captured by the monkey-patch,
+                # attach it to empty DataFrame results so callers can inspect the cause.
+                try:
+                    payload = getattr(self._local, "last_error_payload", None)
+                    if payload is not None:
+                        try:
+                            import pandas as _pd
+                        except Exception:
+                            _pd = None
+
+                        try:
+                            if _pd is not None and isinstance(result, _pd.DataFrame) and result.empty:
+                                try:
+                                    # use DataFrame.attrs for storing metadata
+                                    result.attrs["error_payload"] = payload
+                                except Exception:
+                                    pass
+                                try:
+                                    delattr(self._local, "last_error_payload")
+                                except Exception:
+                                    try:
+                                        self._local.last_error_payload = None
+                                    except Exception:
+                                        pass
+                        except Exception:
+                            # result may be non-DataFrame or partially structured; handle tuples/lists
+                            try:
+                                if isinstance(result, (list, tuple)):
+                                    changed = False
+                                    for r in result:
+                                        try:
+                                            if _pd is not None and isinstance(r, _pd.DataFrame) and r.empty:
+                                                try:
+                                                    r.attrs["error_payload"] = payload
+                                                    changed = True
+                                                except Exception:
+                                                    pass
+                                        except Exception:
+                                            continue
+                                    if changed:
+                                        try:
+                                            delattr(self._local, "last_error_payload")
+                                        except Exception:
+                                            try:
+                                                self._local.last_error_payload = None
+                                            except Exception:
+                                                pass
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
+
                 # 결과 기반 토큰 만료 검사: API가 HTTP 200으로 응답하면서
                 # body에 만료 코드(EGW00123 등)를 담아오는 경우를 감지
                 try:
@@ -153,11 +300,46 @@ class KISBroker:
 
                     if should_retry:
                         self.logger.warning(f"check_result 요청으로 재시도합니다. (시도 {attempt}/{max_retries})")
+                        # 최소한의 요약 정보를 WARNING 레벨로 남겨서
+                        # INFO/ERROR 로그 레벨에서도 원인 파악이 가능하도록 합니다.
+                        try:
+                            if result is None:
+                                self.logger.warning("check_result 요약: 결과가 None입니다.")
+                            else:
+                                try:
+                                    import pandas as _pd
+                                except Exception:
+                                    _pd = None
+
+                                if _pd is not None and isinstance(result, _pd.DataFrame):
+                                    try:
+                                        self.logger.warning(
+                                            f"check_result 요약: DataFrame 빈값={result.empty}, shape={result.shape}"
+                                        )
+                                    except Exception:
+                                        self.logger.warning("check_result 요약: DataFrame (요약 불가)")
+                                elif isinstance(result, (dict, list, tuple)):
+                                    try:
+                                        self.logger.warning(
+                                            f"check_result 요약: payload type={type(result).__name__}, len={len(result) if hasattr(result, '__len__') else 'N/A'}"
+                                        )
+                                    except Exception:
+                                        self.logger.warning("check_result 요약: payload (요약 불가)")
+                                else:
+                                    try:
+                                        self.logger.warning(f"check_result 요약: {str(result)[:200]}")
+                                    except Exception:
+                                        self.logger.warning("check_result 요약: 결과(문자열화 실패)")
+                        except Exception:
+                            # 요약 로깅에서 오류가 발생해도 진행
+                            pass
+
                         try:
                             # 결과가 있을 경우 가능한 상세 응답/헤더를 추출해 로깅
                             self._log_response_details(result, f"check_result 재시도 (시도 {attempt}/{max_retries})")
                         except Exception as _e:
                             self.logger.debug(f"상세 응답 로깅 중 오류: {_e}")
+
                         if attempt < max_retries:
                             time.sleep(delay_sec)
                             continue
@@ -238,6 +420,17 @@ class KISBroker:
                 self.logger.debug(f"{context}: no response object")
                 return
 
+            # monkey-patch에서 이미 로깅한 응답이면 중복 로깅을 방지
+            try:
+                if getattr(obj, "_logged_by_kisbroker", False):
+                    try:
+                        self.logger.debug(f"{context}: response already logged by KISBroker, skipping duplicate")
+                    except Exception:
+                        pass
+                    return
+            except Exception:
+                pass
+
             # examples_user의 APIResp 타입(유사 객체)
             if hasattr(obj, "getHeader") and hasattr(obj, "getBody"):
                 try:
@@ -268,6 +461,83 @@ class KISBroker:
                 except Exception:
                     pass
 
+            # examples_user의 APIRespError 또는 간단한 에러 객체 처리
+            # 일부 KIS 예제는 HTTP 에러시 APIRespError(status_code, error_text)를 반환합니다.
+            # 이 객체는 'status_code'와 'error_text' 속성이 있으므로 이를 감지하여 본문을 로깅합니다.
+            try:
+                if hasattr(obj, "status_code") and (hasattr(obj, "error_text") or hasattr(obj, "getErrorMessage") or hasattr(obj, "getErrorMessage")):
+                    try:
+                        status_code = getattr(obj, "status_code", None)
+                        # error text may be in different attributes
+                        body_text = None
+                        if hasattr(obj, "error_text"):
+                            body_text = getattr(obj, "error_text")
+                        elif hasattr(obj, "getErrorMessage"):
+                            try:
+                                body_text = obj.getErrorMessage()
+                            except Exception:
+                                body_text = None
+                        elif hasattr(obj, "getErrorCode"):
+                            try:
+                                body_text = obj.getErrorCode()
+                            except Exception:
+                                body_text = None
+
+                        payload = {
+                            "context": context,
+                            "type": "api_error",
+                            "http_status": status_code,
+                            "http_body_truncated": (str(body_text)[:5000] if body_text is not None else None),
+                        }
+                        # WARNING 수준으로 본문을 남김(500 경우 조사에 용이)
+                        try:
+                            already_logged = False
+                            try:
+                                already_logged = bool(getattr(obj, "_logged_by_kisbroker", False))
+                            except Exception:
+                                already_logged = False
+
+                            if not already_logged:
+                                if status_code is not None and int(status_code) >= 500:
+                                    self.logger.warning(f"{context} - HTTP {status_code} body (truncated 5k): {str(body_text)[:5000]}")
+                                else:
+                                    self.logger.info(f"{context} - API error: {str(body_text)[:1000]}")
+                        except Exception:
+                            pass
+
+                        try:
+                            # structured 형태로도 남김
+                            self.logger.debug("structured_response", extra={"json_payload": payload})
+                        except Exception:
+                            try:
+                                import json as _json
+                                compact = _json.dumps(payload, ensure_ascii=False)
+                            except Exception:
+                                compact = str(payload)
+                            try:
+                                self.logger.debug(f"{context} - structured_response_payload: {compact[:2000]}")
+                            except Exception:
+                                pass
+
+                        # 500대면 추가 경고 (중복 로깅 방지)
+                        try:
+                            already_logged = False
+                            try:
+                                already_logged = bool(getattr(obj, "_logged_by_kisbroker", False))
+                            except Exception:
+                                already_logged = False
+
+                            if status_code is not None and int(status_code) >= 500 and not already_logged:
+                                self.logger.warning(f"{context} - 비JSON 500 응답(원문 일부): {str(body_text)[:2000]}")
+                        except Exception:
+                            pass
+
+                        return
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
             # requests.Response 또는 response 속성이 있는 예외
             resp = None
             if hasattr(obj, "response"):
@@ -290,18 +560,82 @@ class KISBroker:
                 except Exception:
                     text = str(resp)
 
+                # 상태 코드 추출을 시도
+                status_code = None
+                try:
+                    status_code = getattr(resp, "status_code", None) or getattr(resp, "status", None)
+                except Exception:
+                    status_code = None
+
+                # JSON 파싱 시도
+                parsed_json = None
+                is_json = False
+                try:
+                    import json as _json
+
+                    if text is not None and isinstance(text, str) and text.strip():
+                        parsed_json = _json.loads(text)
+                        is_json = True
+                except Exception:
+                    parsed_json = None
+                    is_json = False
+
+                # payload에 비JSON 처리 포함 (원문은 잘라서 저장)
                 payload = {
                     "context": context,
                     "type": "http",
-                    "http_status": getattr(resp, "status_code", None),
+                    "http_status": status_code,
                     "http_headers": headers,
-                    "http_body_truncated": (text[:1000] if text is not None else None),
+                    "http_body_truncated": (text[:5000] if text is not None else None),
+                    "http_body_is_json": is_json,
                 }
-                # human console
-                self.logger.debug(f"{context} - HTTP headers: {headers}")
-                self.logger.debug(f"{context} - HTTP body (truncated): {text[:1000]}")
-                # structured JSON
-                self.logger.debug("structured_response", extra={"json_payload": payload})
+                if is_json:
+                    payload["http_json"] = parsed_json
+
+                # human console: 항상 headers와 본문 요약은 남김
+                try:
+                    self.logger.debug(f"{context} - HTTP headers: {headers}")
+                except Exception:
+                    pass
+
+                try:
+                    # 500대 에러는 WARNING으로 본문을 남겨 원인 조사에 용이하게 합니다.
+                    if status_code is not None and int(status_code) >= 500:
+                        self.logger.warning(f"{context} - HTTP {status_code} body (truncated 5k): {text[:5000]}")
+                    else:
+                        self.logger.debug(f"{context} - HTTP body (truncated 1k): {text[:1000]}")
+                except Exception:
+                    pass
+
+                # structured JSON 로그는 항상 남김(파서/로그 수집기용)
+                try:
+                    # structured payload를 extra로 남기고, 포맷터가 extra를 사용하지 않을 경우
+                    # 콘솔/파일에 표시되도록 메시지 문자열로도 남깁니다.
+                    try:
+                        self.logger.debug("structured_response", extra={"json_payload": payload})
+                    except Exception:
+                        pass
+                    try:
+                        import json as _json
+                        compact = _json.dumps(payload, ensure_ascii=False)
+                    except Exception:
+                        compact = str(payload)
+                    # 길이가 너무 길면 잘라서 남김
+                    try:
+                        self.logger.debug(f"{context} - structured_response_payload: {compact[:2000]}")
+                    except Exception:
+                        pass
+                except Exception:
+                    # structured JSON 로깅 중 오류가 발생해도 진행
+                    pass
+
+                # 비JSON일 경우 추가 경고 로그를 남겨서 원문 분석이 필요함을 표시
+                if not is_json and status_code is not None and int(status_code) >= 500:
+                    try:
+                        self.logger.warning(f"{context} - 비JSON 500 응답(원문 일부): {text[:2000]}")
+                    except Exception:
+                        pass
+
                 return
 
             # pandas DataFrame
@@ -498,6 +832,47 @@ class KISBroker:
 
         return False
     
+    def _check_retry_on_rate_limit_only(self, result, exception) -> bool:
+        """재시도 판정: 오직 rate-limit 또는 토큰만료같은 오류에 대해서만 재시도하도록 제한합니다.
+
+        - 예외가 주어지면 rate-limit 관련 메시지(EGW00201 등)가 있는지 검사
+        - 결과 기반 판정은 항상 재시도하지 않음(빈 결과로 인한 불필요한 재시도 방지)
+        """
+        if exception is not None:
+            msg = str(exception)
+            if "EGW00201" in msg or "초당 거래건수" in msg or "초당 거래건수를 초과" in msg:
+                return True
+            return False
+
+        # 결과가 비어있다고 해서 자동 재시도하지 않음
+        return False
+
+    def _format_order_response(self, success: bool, result, qty: int = None, price: int = None,
+                               order_id: str = None, side: str = None, fees: dict = None, message: str = None) -> Dict:
+        """
+        주문 응답을 일관된 dict 포맷으로 반환합니다.
+
+        반환 키(하위 호환 유지):
+          - success: bool
+          - side: 'buy'|'sell'|None
+          - data: 원본 응답 객체
+          - order_id: 주문 아이디(가능할 경우)
+          - fees: 수수료/세금 계산 결과 dict (가능할 경우)
+          - message: 에러 또는 상태 메시지
+        """
+        payload = {
+            "success": bool(success),
+            "side": side,
+            "data": result,
+            "order_id": order_id,
+            "fees": fees,
+            "message": message,
+        }
+
+        # 하위호환: 일부 호출부에서 직접 result.get('success') / result.get('fees') 등을 사용하므로
+        # 동일한 접근이 가능하도록 dict 형태로 반환
+        return payload
+    
     pass
     
     # ==================== 시세 조회 ====================
@@ -625,7 +1000,7 @@ class KISBroker:
                 fund_sttl_icld_yn="N",
                 fncg_amt_auto_rdpt_yn="N",
                 prcs_dvsn="00",
-                check_result=self._check_retry_on_empty_or_rate_limit
+                check_result=self._check_retry_on_rate_limit_only
             )
             return df1, df2
         except Exception as e:
@@ -683,7 +1058,7 @@ class KISBroker:
         """
         if not Config.TRADING_ENABLED:
             self.logger.warning(f"[DRY RUN] 매수 주문: {symbol}, 수량: {qty}, 가격: {price}")
-            return {"success": False, "message": "TRADING_ENABLED=False"}
+            return self._format_order_response(False, None, qty=qty, price=price, side="buy", message="TRADING_ENABLED=False")
         
         try:
             result = self._call_with_retry(
@@ -702,36 +1077,54 @@ class KISBroker:
             
             self.logger.info(f"매수 주문 완료: {symbol}, 수량: {qty}, 가격: {price}")
             # 알림 전송 (성공)
+            # 시도: result에서 주문ID 추출
+            order_id = None
             try:
-                # 시도: result에서 주문ID 추출
-                order_id = None
+                import pandas as _pd
+                if isinstance(result, _pd.DataFrame) and not result.empty:
+                    for col in ("ord_no", "ordno", "odno", "orgn_odno", "order_no", "orderId", "order_id"):
+                        if col in result.columns:
+                            v = result.iloc[0].get(col)
+                            if v:
+                                order_id = str(v)
+                                break
+            except Exception:
+                pass
+            if not order_id:
                 try:
-                    import pandas as _pd
-                    if isinstance(result, _pd.DataFrame) and not result.empty:
-                        for col in ("ord_no", "ordno", "odno", "orgn_odno", "order_no", "orderId", "order_id"):
-                            if col in result.columns:
-                                v = result.iloc[0].get(col)
-                                if v:
-                                    order_id = str(v)
-                                    break
+                    if isinstance(result, dict):
+                        for k in ("order_no", "ord_no", "odno", "orgn_odno", "ordno", "orderId", "order_id"):
+                            v = result.get(k)
+                            if v:
+                                order_id = str(v)
+                                break
                 except Exception:
                     pass
-                if not order_id:
-                    try:
-                        if isinstance(result, dict):
-                            for k in ("order_no", "ord_no", "odno", "orgn_odno", "ordno", "orderId", "order_id"):
-                                v = result.get(k)
-                                if v:
-                                    order_id = str(v)
-                                    break
-                    except Exception:
-                        pass
 
+            try:
                 notify_order("BUY", symbol, qty, price, True, order_id=order_id)
             except Exception:
                 pass
 
-            return {"success": True, "data": result, "order_id": order_id}
+            # 수수료/세금 계산: 가격이 0(시장가)이면 응답에서 체결가를 시도 추출
+            exec_price = price
+            try:
+                import pandas as _pd
+                if exec_price == 0 and isinstance(result, _pd.DataFrame) and not result.empty:
+                    for col in ("ord_unpr", "prc", "exec_prc", "exec_price", "trd_prc", "order_price"):
+                        if col in result.columns:
+                            v = result.iloc[0].get(col)
+                            if v:
+                                try:
+                                    exec_price = int(float(v))
+                                except Exception:
+                                    exec_price = int(v)
+                                break
+            except Exception:
+                pass
+
+            fees = calculate_fees_and_taxes(exec_price or 0, qty, side="buy")
+            return self._format_order_response(True, result, qty=qty, price=exec_price or price, order_id=order_id, side="buy", fees=fees)
         except Exception as e:
             self.logger.error(f"매수 주문 실패 ({symbol}): {e}")
             # 알림 전송 (실패)
@@ -739,7 +1132,7 @@ class KISBroker:
                 notify_order("BUY", symbol, qty, price, False, message=str(e))
             except Exception:
                 pass
-            return {"success": False, "message": str(e)}
+            return self._format_order_response(False, None, qty=qty, price=price, side="buy", message=str(e))
     
     def sell(self, symbol: str, qty: int, price: int = 0, order_type: str = "00") -> Optional[Dict]:
         """
@@ -756,7 +1149,7 @@ class KISBroker:
         """
         if not Config.TRADING_ENABLED:
             self.logger.warning(f"[DRY RUN] 매도 주문: {symbol}, 수량: {qty}, 가격: {price}")
-            return {"success": False, "message": "TRADING_ENABLED=False"}
+            return self._format_order_response(False, None, qty=qty, price=price, side="sell", message="TRADING_ENABLED=False")
         
         try:
             result = self._call_with_retry(
@@ -804,7 +1197,25 @@ class KISBroker:
             except Exception:
                 pass
 
-            return {"success": True, "data": result, "order_id": order_id}
+            # 수수료/세금 계산: 가격이 0(시장가)이면 응답에서 체결가를 시도 추출
+            exec_price = price
+            try:
+                import pandas as _pd
+                if exec_price == 0 and isinstance(result, _pd.DataFrame) and not result.empty:
+                    for col in ("ord_unpr", "prc", "exec_prc", "exec_price", "trd_prc", "order_price"):
+                        if col in result.columns:
+                            v = result.iloc[0].get(col)
+                            if v:
+                                try:
+                                    exec_price = int(float(v))
+                                except Exception:
+                                    exec_price = int(v)
+                                break
+            except Exception:
+                pass
+
+            fees = calculate_fees_and_taxes(exec_price or 0, qty, side="sell")
+            return self._format_order_response(True, result, qty=qty, price=exec_price or price, order_id=order_id, side="sell", fees=fees)
         except Exception as e:
             self.logger.error(f"매도 주문 실패 ({symbol}): {e}")
             # 알림 전송 (실패)
@@ -812,7 +1223,7 @@ class KISBroker:
                 notify_order("SELL", symbol, qty, price, False, message=str(e))
             except Exception:
                 pass
-            return {"success": False, "message": str(e)}
+            return self._format_order_response(False, None, qty=qty, price=price, side="sell", message=str(e))
     
     def cancel_order(self, order_no: str, qty: int, symbol: str, order_type: str) -> Optional[Dict]:
         """
@@ -829,7 +1240,7 @@ class KISBroker:
         """
         if not Config.TRADING_ENABLED:
             self.logger.warning(f"[DRY RUN] 주문 취소: {order_no}")
-            return {"success": False, "message": "TRADING_ENABLED=False"}
+            return self._format_order_response(False, None, side="cancel", message="TRADING_ENABLED=False")
         
         try:
             result = self._call_with_retry(
@@ -848,10 +1259,10 @@ class KISBroker:
             )
             
             self.logger.info(f"주문 취소 완료: {order_no}")
-            return {"success": True, "data": result}
+            return self._format_order_response(True, result, side="cancel", order_id=order_no)
         except Exception as e:
             self.logger.error(f"주문 취소 실패 ({order_no}): {e}")
-            return {"success": False, "message": str(e)}
+            return self._format_order_response(False, None, side="cancel", message=str(e))
 
     # ==================== 해외 주문 지원 ====================
     def _map_overseas_ord_dvsn(self, order_type: str, side: str) -> Tuple[str, str]:
@@ -1187,5 +1598,6 @@ class KISBroker:
                     strategy.state.pop("quota_enter_pending", None)
         except Exception:
             pass
+
 
         return results
