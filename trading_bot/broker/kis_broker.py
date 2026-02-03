@@ -304,6 +304,70 @@ class KISBroker:
                 except Exception:
                     pass
 
+            # examples_user의 APIRespError 또는 간단한 에러 객체 처리
+            # 일부 KIS 예제는 HTTP 에러시 APIRespError(status_code, error_text)를 반환합니다.
+            # 이 객체는 'status_code'와 'error_text' 속성이 있으므로 이를 감지하여 본문을 로깅합니다.
+            try:
+                if hasattr(obj, "status_code") and (hasattr(obj, "error_text") or hasattr(obj, "getErrorMessage") or hasattr(obj, "getErrorMessage")):
+                    try:
+                        status_code = getattr(obj, "status_code", None)
+                        # error text may be in different attributes
+                        body_text = None
+                        if hasattr(obj, "error_text"):
+                            body_text = getattr(obj, "error_text")
+                        elif hasattr(obj, "getErrorMessage"):
+                            try:
+                                body_text = obj.getErrorMessage()
+                            except Exception:
+                                body_text = None
+                        elif hasattr(obj, "getErrorCode"):
+                            try:
+                                body_text = obj.getErrorCode()
+                            except Exception:
+                                body_text = None
+
+                        payload = {
+                            "context": context,
+                            "type": "api_error",
+                            "http_status": status_code,
+                            "http_body_truncated": (str(body_text)[:5000] if body_text is not None else None),
+                        }
+                        # WARNING 수준으로 본문을 남김(500 경우 조사에 용이)
+                        try:
+                            if status_code is not None and int(status_code) >= 500:
+                                self.logger.warning(f"{context} - HTTP {status_code} body (truncated 5k): {str(body_text)[:5000]}")
+                            else:
+                                self.logger.info(f"{context} - API error: {str(body_text)[:1000]}")
+                        except Exception:
+                            pass
+
+                        try:
+                            # structured 형태로도 남김
+                            self.logger.debug("structured_response", extra={"json_payload": payload})
+                        except Exception:
+                            try:
+                                import json as _json
+                                compact = _json.dumps(payload, ensure_ascii=False)
+                            except Exception:
+                                compact = str(payload)
+                            try:
+                                self.logger.debug(f"{context} - structured_response_payload: {compact[:2000]}")
+                            except Exception:
+                                pass
+
+                        # 500대면 추가 경고
+                        try:
+                            if status_code is not None and int(status_code) >= 500:
+                                self.logger.warning(f"{context} - 비JSON 500 응답(원문 일부): {str(body_text)[:2000]}")
+                        except Exception:
+                            pass
+
+                        return
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
             # requests.Response 또는 response 속성이 있는 예외
             resp = None
             if hasattr(obj, "response"):
