@@ -326,18 +326,70 @@ class KISBroker:
                 except Exception:
                     text = str(resp)
 
+                # 상태 코드 추출을 시도
+                status_code = None
+                try:
+                    status_code = getattr(resp, "status_code", None) or getattr(resp, "status", None)
+                except Exception:
+                    status_code = None
+
+                # JSON 파싱 시도
+                parsed_json = None
+                is_json = False
+                try:
+                    import json as _json
+
+                    if text is not None and isinstance(text, str) and text.strip():
+                        parsed_json = _json.loads(text)
+                        is_json = True
+                except Exception:
+                    parsed_json = None
+                    is_json = False
+
+                # payload에 비JSON 처리 포함 (원문은 잘라서 저장)
                 payload = {
                     "context": context,
                     "type": "http",
-                    "http_status": getattr(resp, "status_code", None),
+                    "http_status": status_code,
                     "http_headers": headers,
-                    "http_body_truncated": (text[:1000] if text is not None else None),
+                    "http_body_truncated": (text[:5000] if text is not None else None),
+                    "http_body_is_json": is_json,
                 }
-                # human console
-                self.logger.debug(f"{context} - HTTP headers: {headers}")
-                self.logger.debug(f"{context} - HTTP body (truncated): {text[:1000]}")
-                # structured JSON
-                self.logger.debug("structured_response", extra={"json_payload": payload})
+                if is_json:
+                    payload["http_json"] = parsed_json
+
+                # human console: 항상 headers와 본문 요약은 남김
+                try:
+                    self.logger.debug(f"{context} - HTTP headers: {headers}")
+                except Exception:
+                    pass
+
+                try:
+                    # 500대 에러는 WARNING으로 본문을 남겨 원인 조사에 용이하게 합니다.
+                    if status_code is not None and int(status_code) >= 500:
+                        self.logger.warning(f"{context} - HTTP {status_code} body (truncated 5k): {text[:5000]}")
+                    else:
+                        self.logger.debug(f"{context} - HTTP body (truncated 1k): {text[:1000]}")
+                except Exception:
+                    pass
+
+                # structured JSON 로그는 항상 남김(파서/로그 수집기용)
+                try:
+                    self.logger.debug("structured_response", extra={"json_payload": payload})
+                except Exception:
+                    # 로거가 extra를 지원하지 않을 경우 대비하여 대체 로그
+                    try:
+                        self.logger.debug(f"{context} - structured_response_payload: {str(payload)[:2000]}")
+                    except Exception:
+                        pass
+
+                # 비JSON일 경우 추가 경고 로그를 남겨서 원문 분석이 필요함을 표시
+                if not is_json and status_code is not None and int(status_code) >= 500:
+                    try:
+                        self.logger.warning(f"{context} - 비JSON 500 응답(원문 일부): {text[:2000]}")
+                    except Exception:
+                        pass
+
                 return
 
             # pandas DataFrame
