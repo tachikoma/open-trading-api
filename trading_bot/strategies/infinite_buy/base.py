@@ -4,6 +4,7 @@ import math
 from datetime import datetime
 import pytz
 
+from trading_bot.broker.kis_broker import KISBroker
 from trading_bot.config import Config
 from trading_bot.utils.logger import setup_logger
 
@@ -20,7 +21,7 @@ class InfiniteBuyBase(ABC):
     공용 유틸리티(예: `ceil2`, `quota`)를 제공합니다.
     """
 
-    def __init__(self, config: Dict[str, Any], broker: Any = None):
+    def __init__(self, config: Dict[str, Any], broker: KISBroker = None):
         # 전략 설정(config)과 브로커 참조를 보관
         self.config = config or {}
         self.broker = broker
@@ -225,8 +226,16 @@ class InfiniteBuyBase(ABC):
             for sym in symbols:
                 try:
                     price_df = None
-                    if self.broker is not None and hasattr(self.broker, 'get_current_price'):
-                        price_df = self.broker.get_current_price(sym)
+                    if self.broker is not None:
+                        # InfiniteBuy는 해외(미국) 주식 전용 전략이므로 해외 현재가 조회 사용
+                        if hasattr(self.broker, 'get_current_price_overseas'):
+                            # 심볼별 설정에서 거래소 코드 가져오기 (기본값: NAS)
+                            cfg = self.cfg_for(sym)
+                            exch = cfg.get('exchange', 'NAS')
+                            price_df = self.broker.get_current_price_overseas(sym, exch=exch)
+                        elif hasattr(self.broker, 'get_current_price'):
+                            # 폴백: 기존 메서드 사용 (하위 호환)
+                            price_df = self.broker.get_current_price(sym)
                     price = self._extract_price_from_df(price_df)
                     if price <= 0:
                         self.logger.debug(f"{sym}: 현재가 없음 또는 0, 스킵")

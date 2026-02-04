@@ -353,7 +353,7 @@ class Config:
                 # 예시: 각 티커마다 총투자금(total_amount)과 분할횟수(splits)를 반드시 명시하세요.
                 "symbols": {
                     "TQQQ": {"total_amount": 300000, "splits": 30},
-                    "SOXL": {"total_amount": 500000, "splits": 20},
+                    "SOXL": {"exchange":"AMS", "total_amount": 500000, "splits": 20},
                 },
             },
         },

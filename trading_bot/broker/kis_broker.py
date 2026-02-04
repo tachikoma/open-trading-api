@@ -879,7 +879,7 @@ class KISBroker:
     
     def get_current_price(self, symbol: str) -> Optional[pd.DataFrame]:
         """
-        현재가 조회
+        현재가 조회 (국내 주식)
         
         Args:
             symbol: 종목코드 (예: "005930")
@@ -898,6 +898,52 @@ class KISBroker:
             return df
         except Exception as e:
             self.logger.error(f"현재가 조회 실패 ({symbol}): {e}")
+            return None
+    
+    def get_current_price_overseas(self, symbol: str, exch: str = "NAS") -> Optional[pd.DataFrame]:
+        """
+        해외 주식 현재가 조회
+        
+        Args:
+            symbol: 해외 종목코드 (예: "AAPL", "TQQQ")
+            exch: 거래소 코드 (NAS: 나스닥, NYS: 뉴욕, AMS: 아멕스 등)
+        
+        Returns:
+            현재가 정보 DataFrame
+        """
+        try:
+            # 거래소 코드 정규화 (사용자 입력 허용)
+            exch_map = {
+                "NASD": "NAS",
+                "NYSE": "NYS",
+                "AMEX": "AMS",
+            }
+            excd = exch_map.get((exch or "").upper(), (exch or "NAS").upper())
+
+            df = self._call_with_retry(
+                osf.price,
+                auth="",
+                excd=excd,
+                symb=symbol,
+                env_dv=self.env_mode,
+                check_result=self._check_retry_on_empty_or_rate_limit
+            )
+            # 빈 응답일 경우 price_detail로 폴백 시도
+            if df is None or (hasattr(df, "empty") and df.empty):
+                try:
+                    detail_df = self._call_with_retry(
+                        osf.price_detail,
+                        auth="",
+                        excd=excd,
+                        symb=symbol,
+                        check_result=self._check_retry_on_empty_or_rate_limit
+                    )
+                    return detail_df
+                except Exception as e:
+                    self.logger.error(f"해외 현재가 상세 조회 실패 ({symbol}): {e}")
+            return df
+        except Exception as e:
+            self.logger.error(f"해외 현재가 조회 실패 ({symbol}): {e}")
             return None
     
     def get_daily_price(self, symbol: str, period: str = "D") -> Optional[pd.DataFrame]:
