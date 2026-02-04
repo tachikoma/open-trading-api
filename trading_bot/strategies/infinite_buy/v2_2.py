@@ -58,17 +58,26 @@ class InfiniteBuyV2_2(InfiniteBuyBase):
     def decide_buy(self, date, quote: Dict) -> List[Dict[str, Any]]:
         # v2.2 매수 의도 생성 로직 (심볼별 total_amount, splits 기준)
         # 1) 심볼/가격 먼저 추출
+        self.logger.debug("decide_buy: entry date=%s quote=%s state={quota_stop_loss_mode:%s, quota_cycle_count:%s, quota_enter_pending:%s}",
+                          date, quote,
+                          self.state.get("quota_stop_loss_mode"),
+                          self.state.get("quota_cycle_count"),
+                          self.state.get("quota_enter_pending"))
         if bool(self.state.get("quota_activate_on_next_buy", False)):
             self.state["quota_stop_loss_mode"] = True
             self.state["quota_activate_on_next_buy"] = False
             # do not place any buy orders on this turn (entry-only turn)
+            self.logger.info("decide_buy: activate_quota_mode -> no_orders state={quota_stop_loss_mode:%s}",
+                             self.state.get("quota_stop_loss_mode"))
             return []
 
         if not isinstance(quote, dict):
+            self.logger.warning("decide_buy: invalid_quote_type type=%s", type(quote))
             return []
         price = float(quote.get("price") or 0.0)
         symbol = quote.get("symbol")
         if symbol is None or price <= 0:
+            self.logger.warning("decide_buy: invalid_symbol_or_price symbol=%s price=%s", symbol, price)
             return []
 
         # 2) 심볼별 설정 병합
@@ -97,6 +106,8 @@ class InfiniteBuyV2_2(InfiniteBuyBase):
         T = self.compute_T(cum_buy)
         star_pct = self.compute_star_percent(T, symbol)
         target_star = price * (1.0 + float(star_pct) / 100.0)
+        self.logger.debug("decide_buy: metrics symbol=%s price=%s cum_buy=%s T=%s star_pct=%s target_star=%s",
+                  symbol, price, cum_buy, T, star_pct, round(float(target_star), 2))
 
         # 모든 매수 주문은 LOC 타입으로 처리
         order_type = "LOC"
@@ -108,6 +119,7 @@ class InfiniteBuyV2_2(InfiniteBuyBase):
         # 최소 2주 이상 가능해야 분할 매수 규칙 적용
         if qty_int < 2:
             # 소수 수량(또는 1주 미만)인 경우 fractional intent로 반환
+            self.logger.info("decide_buy: fractional_only symbol=%s amount=%s qty_float=%s", symbol, amount, qty_float)
             intents = [{
                 "type": "buy",
                 "symbol": symbol,
@@ -135,6 +147,8 @@ class InfiniteBuyV2_2(InfiniteBuyBase):
             total_reentry = float(self.state.get("quota_reentry_amount", 0.0))
             # 이미 10회 수행했으면 추가 매수는 생성하지 않음
             if cycle_done >= 10 or total_reentry <= 0:
+                self.logger.info("decide_buy: quota_mode_no_orders symbol=%s cycle_done=%s total_reentry=%s",
+                                 symbol, cycle_done, total_reentry)
                 return []
 
             per_round = total_reentry / 10.0
@@ -146,6 +160,8 @@ class InfiniteBuyV2_2(InfiniteBuyBase):
 
             # 의도 생성: fractional 또는 정수
             if qty_int_r < 1:
+                self.logger.info("decide_buy: quota_reentry_fractional symbol=%s round=%s amount=%s qty_float=%s price=%s",
+                                 symbol, cycle_done + 1, amount_round, qty_float_r, buy_price)
                 intents = [{
                     "type": "buy",
                     "symbol": symbol,
@@ -163,6 +179,8 @@ class InfiniteBuyV2_2(InfiniteBuyBase):
                     "quota_per_round": amount_round,
                 }]
             else:
+                self.logger.info("decide_buy: quota_reentry_integer symbol=%s round=%s amount=%s qty_int=%s price=%s",
+                                 symbol, cycle_done + 1, amount_round, qty_int_r, buy_price)
                 intents = [{
                     "type": "buy",
                     "symbol": symbol,
@@ -185,6 +203,8 @@ class InfiniteBuyV2_2(InfiniteBuyBase):
         # 전반전/후반전 분기: 전체 분할수(splits)를 양분하여 전반/후반 기준 사용
         splits_half = float(splits_cfg) / 2.0
         if T < splits_half:
+            self.logger.info("decide_buy: pre_split symbol=%s T=%s splits_half=%s qty_int=%s",
+                             symbol, T, splits_half, qty_int)
             # 전반전: 정수 수량을 floor/ceil로 분할하여 두 번의 매수 의도 생성
             first_qty = qty_int // 2
             second_qty = qty_int - first_qty
@@ -218,6 +238,8 @@ class InfiniteBuyV2_2(InfiniteBuyBase):
                 ],
             })
         else:
+            self.logger.info("decide_buy: post_split symbol=%s T=%s splits_half=%s qty_int=%s star_pct=%s",
+                             symbol, T, splits_half, qty_int, star_pct)
             # 후반전: 전체 qty_int 수량을 star% 위치의 LOC 단일 주문으로 시도
             buy_at_star = (price * (1.0 + float(star_pct) / 100.0)) - 0.01
             intents.append({
@@ -253,7 +275,9 @@ class InfiniteBuyV2_2(InfiniteBuyBase):
             for it in intents:
                 # 표시는 남기되 즉시 재진입 매수로 처리되면 안되므로 'quota_pending' 메타만 추가
                 it["quota_pending"] = True
-
+            self.logger.info("decide_buy: quota_pending_set symbol=%s cum_buy_state=%s total_amount=%s remaining=%s",
+                             symbol, cum_buy_state, total_amount, remaining)
+        self.logger.info("decide_buy: exit symbol=%s intents=%s", symbol, len(intents))
         return intents
 
     def decide_sell(self, position:Dict, market_price) -> List[Dict[str, Any]]:
@@ -261,13 +285,19 @@ class InfiniteBuyV2_2(InfiniteBuyBase):
         # - 1/4 수량: 평단가 대비 별퍼센트에 LOC 매도
         # - 3/4 수량: 평단가 대비 +10%에 지정가 매도
         # position에는 최소한 `symbol`, `quantity`, `avg_price`가 포함되어야 합니다.
+        self.logger.debug("decide_sell: entry position=%s market_price=%s state={quota_stop_loss_mode:%s, quota_cycle_count:%s}",
+                          position, market_price,
+                          self.state.get("quota_stop_loss_mode"),
+                          self.state.get("quota_cycle_count"))
         if not isinstance(position, dict):
+            self.logger.warning("decide_sell: invalid_position_type type=%s", type(position))
             return []
         qty = float(position.get("quantity", 0.0))
         avg_price = float(position.get("avg_price", position.get("price", 0.0)))
         symbol = position.get("symbol")
         cum_buy = float(position.get("cum_buy_amt", self.get_cum_buy(symbol)))
         if qty <= 0 or avg_price <= 0:
+            self.logger.warning("decide_sell: invalid_qty_or_price symbol=%s qty=%s avg_price=%s", symbol, qty, avg_price)
             return []
 
         T = self.compute_T(cum_buy)
@@ -278,6 +308,8 @@ class InfiniteBuyV2_2(InfiniteBuyBase):
 
         sell_qty1 = qty * 0.25
         sell_qty2 = qty - sell_qty1
+        self.logger.debug("decide_sell: metrics symbol=%s qty=%s avg_price=%s T=%s star_pct=%s target_star=%s target_plus10=%s",
+                  symbol, qty, avg_price, T, star_pct, round(float(target_star), 2), round(float(target_plus10), 2))
 
         intents: List[Dict[str, Any]] = []
         # 쿼터 손절 모드 처리
@@ -286,6 +318,7 @@ class InfiniteBuyV2_2(InfiniteBuyBase):
             initial_moc_done = bool(self.state.get("quota_initial_moc_done", False))
             # 최초 진입 시에는 우선 누적수량의 1/4을 MOC로 즉시 매도하고 종료
             if not initial_moc_done and sell_qty1 > 0:
+                self.logger.info("decide_sell: quota_initial_moc symbol=%s qty=%s", symbol, sell_qty1)
                 intents.append({
                     "type": "sell",
                     "symbol": symbol,
@@ -301,6 +334,8 @@ class InfiniteBuyV2_2(InfiniteBuyBase):
                 return intents
             # 1~10회 재진입 중(또는 그 직후)에는 1/4을 -10% LOC로 손절, 나머지 +10% 지정가
             if cycle_done < 10:
+                self.logger.info("decide_sell: quota_cycle_sell symbol=%s cycle=%s sell_qty1=%s sell_qty2=%s",
+                                 symbol, cycle_done, sell_qty1, sell_qty2)
                 if sell_qty1 > 0:
                     intents.append({
                         "type": "sell",
@@ -330,6 +365,7 @@ class InfiniteBuyV2_2(InfiniteBuyBase):
                 # 10회 재진입이 끝난 직후: 아직 final MOC를 수행하지 않았다면 1/4을 MOC로 즉시 매도
                 final_done = bool(self.state.get("quota_final_moc_done", False))
                 if not final_done and sell_qty1 > 0:
+                    self.logger.info("decide_sell: quota_final_moc symbol=%s qty=%s", symbol, sell_qty1)
                     intents.append({
                         "type": "sell",
                         "symbol": symbol,
@@ -363,4 +399,5 @@ class InfiniteBuyV2_2(InfiniteBuyBase):
                 "order_type": "LIMIT",
                 "reason": "daily_limit_sell_at_plus10",
             })
+        self.logger.info("decide_sell: exit symbol=%s intents=%s", symbol, len(intents))
         return intents
