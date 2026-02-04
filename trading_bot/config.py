@@ -9,42 +9,10 @@
 """
 import os
 from pathlib import Path
-from typing import Optional
 from dotenv import load_dotenv, find_dotenv
 
 # load .env from repository root (if present)
 load_dotenv(find_dotenv())
-
-
-def _parse_env_file(path: Path) -> dict:
-    """간단한 .env 파서: KEY=VALUE 형태를 읽어 dict 반환
-
-    - 주석(#)과 빈 줄 무시
-    - 값은 따옴표(' or ")로 감싸져 있을 수 있음
-    """
-    result = {}
-    if not path.exists():
-        return result
-
-    try:
-        with path.open("r", encoding="utf-8") as f:
-            for raw in f:
-                line = raw.strip()
-                if not line or line.startswith("#"):
-                    continue
-                if "=" not in line:
-                    continue
-                key, val = line.split("=", 1)
-                key = key.strip()
-                val = val.strip()
-                # strip optional quotes
-                if (val.startswith('"') and val.endswith('"')) or (val.startswith("'") and val.endswith("'")):
-                    val = val[1:-1]
-                result[key] = val
-    except Exception:
-        return {}
-
-    return result
 
 
 class Config:
@@ -62,15 +30,11 @@ class Config:
     _DEFAULT_ENV_MODE = "real"
     _DEFAULT_TRADING_ENABLED = False
 
-    # .env 파일에서 값을 읽음
-    _env_file = ROOT_DIR / ".env"
-    _env_vals = _parse_env_file(_env_file)
-
     # ENV_MODE: 환경변수 > .env > 기본값
-    ENV_MODE = os.environ.get("ENV_MODE", _env_vals.get("ENV_MODE", _DEFAULT_ENV_MODE))
+    ENV_MODE = os.environ.get("ENV_MODE", _DEFAULT_ENV_MODE)
 
     # TRADING_ENABLED: 환경변수 > .env > 기본값
-    _raw_trading = os.environ.get("TRADING_ENABLED", _env_vals.get("TRADING_ENABLED", str(_DEFAULT_TRADING_ENABLED)))
+    _raw_trading = os.environ.get("TRADING_ENABLED", str(_DEFAULT_TRADING_ENABLED))
     if isinstance(_raw_trading, bool):
         TRADING_ENABLED = _raw_trading
     else:
@@ -93,39 +57,39 @@ class Config:
     # 로깅 설정
     LOG_DIR = Path(__file__).parent / "logs"
     # LOG_LEVEL: 환경변수 > .env > 기본값
-    LOG_LEVEL = os.environ.get("LOG_LEVEL", _env_vals.get("LOG_LEVEL", "INFO")).upper()  # DEBUG, INFO, WARNING, ERROR
+    LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()  # DEBUG, INFO, WARNING, ERROR
     # 로그 파일명 (통합 로그)
-    LOG_FILE = Path(os.environ.get("LOG_FILE", _env_vals.get("LOG_FILE", str(LOG_DIR / "app.log"))))
+    LOG_FILE = Path(os.environ.get("LOG_FILE", str(LOG_DIR / "app.log")))
     # 로테이션 설정 (.env 또는 환경변수로 오버라이드 가능)
     try:
-        LOG_MAX_BYTES = int(os.environ.get("LOG_MAX_BYTES", _env_vals.get("LOG_MAX_BYTES", str(10 * 1024 * 1024))))
+        LOG_MAX_BYTES = int(os.environ.get("LOG_MAX_BYTES", str(10 * 1024 * 1024)))
     except Exception:
         LOG_MAX_BYTES = 10 * 1024 * 1024
 
     try:
-        LOG_BACKUP_COUNT = int(os.environ.get("LOG_BACKUP_COUNT", _env_vals.get("LOG_BACKUP_COUNT", str(10))))
+        LOG_BACKUP_COUNT = int(os.environ.get("LOG_BACKUP_COUNT", str(10)))
     except Exception:
         LOG_BACKUP_COUNT = 10
 
     # 심볼 매핑 설정
-    _raw_symbol_enabled = os.environ.get("SYMBOL_MAP_ENABLED", _env_vals.get("SYMBOL_MAP_ENABLED", "1"))
+    _raw_symbol_enabled = os.environ.get("SYMBOL_MAP_ENABLED", "1")
     if isinstance(_raw_symbol_enabled, bool):
         SYMBOL_MAP_ENABLED = _raw_symbol_enabled
     else:
         SYMBOL_MAP_ENABLED = str(_raw_symbol_enabled).strip().lower() in ("1", "true", "yes", "on")
 
-    SYMBOL_MAP_DIR = os.environ.get("SYMBOL_MAP_DIR", _env_vals.get("SYMBOL_MAP_DIR", str(Path(__file__).parent / "data")))
+    SYMBOL_MAP_DIR = os.environ.get("SYMBOL_MAP_DIR", str(Path(__file__).parent / "data"))
 
     # Telegram 알림 설정
-    _raw_tele_enabled = os.environ.get("TELEGRAM_ENABLED", _env_vals.get("TELEGRAM_ENABLED", "0"))
+    _raw_tele_enabled = os.environ.get("TELEGRAM_ENABLED", "0")
     if isinstance(_raw_tele_enabled, bool):
         TELEGRAM_ENABLED = _raw_tele_enabled
     else:
         TELEGRAM_ENABLED = str(_raw_tele_enabled).strip().lower() in ("1", "true", "yes", "on")
 
-    TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", _env_vals.get("TELEGRAM_BOT_TOKEN", ""))
-    TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", _env_vals.get("TELEGRAM_CHAT_ID", ""))
-    TELEGRAM_TIMEOUT_SEC = int(os.environ.get("TELEGRAM_TIMEOUT_SEC", _env_vals.get("TELEGRAM_TIMEOUT_SEC", "3")))
+    TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+    TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
+    TELEGRAM_TIMEOUT_SEC = int(os.environ.get("TELEGRAM_TIMEOUT_SEC", "3"))
 
     # 전략 설정
     STRATEGIES_ENABLED = ["ma_crossover"]  # 활성화할 전략 목록
@@ -252,17 +216,17 @@ class Config:
     # 국내 주식 기준: 수수료(편도) 0.015% = 0.00015, 거래세(매도시) 0.20% = 0.002
     # 환경변수 또는 .env로 오버라이드 가능 (예: COMMISSION_RATE, TRADE_TAX_RATE)
     try:
-        COMMISSION_RATE = float(os.environ.get("COMMISSION_RATE", _env_vals.get("COMMISSION_RATE", str(0.00015))))
+        COMMISSION_RATE = float(os.environ.get("COMMISSION_RATE", str(0.00015)))
     except Exception:
         COMMISSION_RATE = 0.00015
 
     try:
-        COMMISSION_MIN = int(os.environ.get("COMMISSION_MIN", _env_vals.get("COMMISSION_MIN", "0")))
+        COMMISSION_MIN = int(os.environ.get("COMMISSION_MIN", "0"))
     except Exception:
         COMMISSION_MIN = 0
 
     try:
-        TRADE_TAX_RATE = float(os.environ.get("TRADE_TAX_RATE", _env_vals.get("TRADE_TAX_RATE", str(0.002))))
+        TRADE_TAX_RATE = float(os.environ.get("TRADE_TAX_RATE", str(0.002)))
     except Exception:
         TRADE_TAX_RATE = 0.002
 
