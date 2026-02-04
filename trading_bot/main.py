@@ -53,6 +53,10 @@ def main():
         else:
             strategies_source = Config.STRATEGIES_ENABLED
 
+        # TODO 임시로 ma_crossover 제외 (테스트용)
+        for strategy in strategies_source:
+            strategies_source.remove(strategy) if "ma_crossover" == strategy["name"] else None
+
         strategies = load_enabled_strategies(strategies_source, broker)
         
         # 스케줄러 초기화
