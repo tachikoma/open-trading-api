@@ -78,9 +78,9 @@ class InfiniteBuyV2_2(InfiniteBuyBase):
         except Exception:
             total_amount = 0.0
         try:
-            splits_cfg = int(cfg.get("splits", self.splits or 40))
+            splits_cfg = int(cfg.get("splits", 40))
         except Exception:
-            splits_cfg = self.splits or 40
+            splits_cfg = 40
 
         # per-symbol 규칙 검증: total_amount와 splits는 반드시 필요
         if total_amount <= 0 or splits_cfg <= 0:

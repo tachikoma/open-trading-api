@@ -14,8 +14,12 @@ class InfiniteBuyBase(ABC):
 
     기본값:
     - `base_currency`: USD
-    - `splits`: 40
     - T 반올림 규칙: 소수점 둘째 자리에서 올림(ceil2)
+
+    필수 설정 (symbols 하위):
+    - `total_amount`: 종목별 총 투자금액
+    - `splits`: 종목별 분할 횟수
+    - `exchange`: 거래소 코드 (예: NAS, AMS)
 
     이 클래스는 전략 구현이 따라야 할 추상 메서드 인터페이스와
     공용 유틸리티(예: `ceil2`, `quota`)를 제공합니다.
@@ -27,7 +31,6 @@ class InfiniteBuyBase(ABC):
         self.broker = broker
         self.version = str(self.config.get("version", "v2.2"))
         self.base_currency = self.config.get("base_currency", "USD")
-        self.splits = int(self.config.get("splits", 40))
         # 전략 상태 저장소 (누적 매수금 등 사용자 정의 상태 보관)
         self.state: Dict[str, Any] = {}
         # 로거: broker가 로거를 제공하면 재사용, 아니면 기본 로거 생성
@@ -37,27 +40,25 @@ class InfiniteBuyBase(ABC):
             self.logger = setup_logger(f"Strategy.{self.__class__.__name__}", Config.LOG_DIR, Config.LOG_LEVEL)
 
     def cfg_for(self, symbol: str) -> Dict[str, Any]:
-        """주어진 `symbol`에 대해 전역 설정(self.config)과 `per_symbol` 오버라이드를 병합한 딕셔너리를 반환합니다.
+        """주어진 `symbol`에 대해 symbols 설정을 반환합니다.
 
         사용 예:
             cfg = self.cfg_for(symbol)
             total_amount = float(cfg.get("total_amount", 0.0))
+            splits = int(cfg.get("splits", 40))
         """
         base = dict(self.config) if isinstance(self.config, dict) else {}
-        # 우선순위: symbol별 설정 맵 키 'symbols' -> legacy 'per_symbol' -> none
         symbols_map = base.get("symbols") or {}
-        per_map = base.get("per_symbol") or {}
-        overrides = {}
-        try:
-            if isinstance(symbols_map, dict) and symbol in symbols_map:
-                overrides = symbols_map.get(symbol, {}) or {}
-            elif isinstance(per_map, dict) and symbol in per_map:
-                overrides = per_map.get(symbol, {}) or {}
-        except Exception:
-            overrides = {}
-        merged = dict(base)
-        merged.update(overrides or {})
-        return merged
+        
+        if isinstance(symbols_map, dict) and symbol in symbols_map:
+            symbol_cfg = symbols_map.get(symbol, {}) or {}
+            # symbol 설정에 base_currency와 version도 포함
+            result = {"base_currency": self.base_currency, "version": self.version}
+            result.update(symbol_cfg)
+            return result
+        
+        # symbols에 없으면 빈 dict 반환 (더 이상 전역 설정을 폴백하지 않음)
+        return {"base_currency": self.base_currency, "version": self.version}
 
     @staticmethod
     def ceil2(value: float) -> float:
@@ -67,11 +68,16 @@ class InfiniteBuyBase(ABC):
         """
         return math.ceil(float(value) * 100.0) / 100.0
 
-    def quota(self, total_amount: float) -> float:
-        """전체 투자금액을 `splits`로 나눈 분할당 금액을 반환합니다."""
-        if self.splits <= 0:
+    def quota(self, total_amount: float, splits: int) -> float:
+        """전체 투자금액을 `splits`로 나눈 분할당 금액을 반환합니다.
+        
+        Args:
+            total_amount: 전체 투자금액
+            splits: 분할 횟수 (심볼별 설정에서 가져옴)
+        """
+        if splits <= 0:
             raise ValueError("splits must be > 0")
-        return float(total_amount) / float(self.splits)
+        return float(total_amount) / float(splits)
 
     @abstractmethod
     def compute_T(self, cum_buy_amt: float, symbol: str = None) -> float:

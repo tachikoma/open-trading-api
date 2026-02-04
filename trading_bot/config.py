@@ -542,38 +542,43 @@ class Config:
                     except Exception:
                         logger.warning("ma_crossover: short_period/long_period 형식이 올바르지 않습니다: %s/%s", sp, lp)
                 if name == "infinite_buy":
-                    # 권장/우선: symbols는 티커->설정(dict) 맵이어야 함
+                    # symbols는 티커->설정(dict) 맵이어야 함 (필수)
                     symbols_map = cfg.get("symbols", {}) or {}
-                    has_symbols_map = isinstance(symbols_map, dict) and len(symbols_map) > 0
-                    # legacy: per_symbol(구 버전) 지원 (경고)
-                    per_map = cfg.get("per_symbol", {}) or {}
-                    has_per = isinstance(per_map, dict) and len(per_map) > 0
-                    total = cfg.get("total_amount", 0)
-
-                    if has_symbols_map:
-                        for sym, entry in symbols_map.items():
-                            if not isinstance(entry, dict):
-                                logger.warning("infinite_buy: symbols[%s] 값은 dict여야 합니다. 현재형: %s", sym, type(entry).__name__)
-                                continue
-                            ta = entry.get("total_amount")
-                            sp = entry.get("splits")
+                    
+                    if not isinstance(symbols_map, dict) or len(symbols_map) == 0:
+                        logger.error("infinite_buy: 'symbols' 설정이 필수입니다. 티커별 total_amount, splits, exchange를 지정해야 합니다.")
+                        continue
+                    
+                    for sym, entry in symbols_map.items():
+                        if not isinstance(entry, dict):
+                            logger.warning("infinite_buy: symbols[%s] 값은 dict여야 합니다. 현재형: %s", sym, type(entry).__name__)
+                            continue
+                        
+                        # total_amount 검증 (필수)
+                        ta = entry.get("total_amount")
+                        if ta is None:
+                            logger.error("infinite_buy: symbols[%s].total_amount는 필수입니다.", sym)
+                        else:
                             try:
-                                if ta is None or float(ta) <= 0:
+                                if float(ta) <= 0:
                                     logger.warning("infinite_buy: symbols[%s].total_amount는 양수여야 합니다. 현재: %s", sym, ta)
                             except Exception:
                                 logger.warning("infinite_buy: symbols[%s].total_amount 형식이 잘못되었습니다: %s", sym, ta)
+                        
+                        # splits 검증 (필수)
+                        sp = entry.get("splits")
+                        if sp is None:
+                            logger.error("infinite_buy: symbols[%s].splits는 필수입니다.", sym)
+                        else:
                             try:
-                                if sp is None or int(sp) <= 0:
+                                if int(sp) <= 0:
                                     logger.warning("infinite_buy: symbols[%s].splits는 양의 정수여야 합니다. 현재: %s", sym, sp)
                             except Exception:
                                 logger.warning("infinite_buy: symbols[%s].splits 형식이 잘못되었습니다: %s", sym, sp)
-                    else:
-                        # backward-compatible validation: 전체(total_amount) 또는 per_symbol 필요
-                        try:
-                            if (float(total) <= 0 if isinstance(total, (int, float, str)) else True) and not has_per:
-                                logger.warning("infinite_buy: 전체(total_amount) 또는 심볼맵(symbols) 또는 종목별(per_symbol) 설정이 필요합니다.")
-                        except Exception:
-                            logger.warning("infinite_buy: total_amount 형식이 잘못되었습니다: %s", total)
-                        logger.warning("infinite_buy: 권장 설정 - 'symbols'에 티커별 'total_amount' 및 'splits'를 지정하세요.")
+                        
+                        # exchange 검증 (선택, 기본값 NAS)
+                        exch = entry.get("exchange")
+                        if exch and not isinstance(exch, str):
+                            logger.warning("infinite_buy: symbols[%s].exchange는 문자열이어야 합니다. 현재: %s", sym, type(exch).__name__)
 
         return True
