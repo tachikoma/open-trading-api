@@ -62,19 +62,48 @@ class SimpleScheduler:
         return cfg
 
     def _is_market_open(self, market: str, now_utc: datetime) -> bool:
+        """
+        시장이 현재 개장 중인지 확인
+        
+        새로운 sessions 구조 지원:
+        - sessions가 있으면 모든 세션을 체크 (하나라도 열려있으면 True)
+        - 기존 구조(open/close)도 하위 호환 지원
+        """
         mh = Config.MARKET_HOURS.get(market)
         if mh is None:
             # 미지정 마켓은 KRX로 간주
             mh = Config.MARKET_HOURS.get("KRX")
+        
         tz = pytz.timezone(mh["tz"])
         now_local = now_utc.astimezone(tz)
-        # weekday: Mon=0
+        
+        # weekday 체크: Mon=0
         if now_local.weekday() not in mh.get("days", [0,1,2,3,4]):
             return False
-        t = now_local.time()
-        open_t = datetime.strptime(mh["open"], "%H:%M").time()
-        close_t = datetime.strptime(mh["close"], "%H:%M").time()
-        return open_t <= t <= close_t
+        
+        current_time = now_local.time()
+        
+        # 새로운 sessions 구조
+        sessions = mh.get("sessions", {})
+        if sessions:
+            # 모든 세션 중 하나라도 열려있으면 True
+            for session_name, session_info in sessions.items():
+                try:
+                    open_t = datetime.strptime(session_info["open"], "%H:%M").time()
+                    close_t = datetime.strptime(session_info["close"], "%H:%M").time()
+                    if open_t <= current_time <= close_t:
+                        return True
+                except Exception:
+                    continue
+            return False
+        
+        # 기존 구조 (하위 호환)
+        try:
+            open_t = datetime.strptime(mh["open"], "%H:%M").time()
+            close_t = datetime.strptime(mh["close"], "%H:%M").time()
+            return open_t <= current_time <= close_t
+        except KeyError:
+            return False
 
     def _near_run_time(self, now_utc: datetime, market_tz: str, run_times: List[str], tolerance_seconds: int) -> bool:
         if not run_times:
@@ -155,16 +184,47 @@ class SimpleScheduler:
                 mh = Config.MARKET_HOURS.get(m, Config.MARKET_HOURS.get("KRX"))
                 tz = pytz.timezone(mh["tz"])
                 now_local = now_utc.astimezone(tz)
-                open_t = datetime.strptime(mh["open"], "%H:%M").time()
-                close_t = datetime.strptime(mh["close"], "%H:%M").time()
-                prev_map = self._last_market_state.setdefault(sid, {})
-                prev_state = prev_map.get(m, False)
-                cur_state = (open_t <= now_local.time() <= close_t) and (now_local.weekday() in mh.get("days", [0,1,2,3,4]))
-                if cur_state and not prev_state and run_on_open:
-                    event_trigger = True
-                if not cur_state and prev_state and run_on_close:
-                    event_trigger = True
-                prev_map[m] = cur_state
+                
+                # 새로운 sessions 구조 지원
+                sessions = mh.get("sessions", {})
+                if sessions:
+                    # 모든 세션 체크 (하나라도 변화 감지)
+                    for session_name, session_info in sessions.items():
+                        try:
+                            open_t = datetime.strptime(session_info["open"], "%H:%M").time()
+                            close_t = datetime.strptime(session_info["close"], "%H:%M").time()
+                            
+                            prev_map = self._last_market_state.setdefault(sid, {})
+                            state_key = f"{m}:{session_name}"
+                            prev_state = prev_map.get(state_key, False)
+                            cur_state = (open_t <= now_local.time() <= close_t) and (now_local.weekday() in mh.get("days", [0,1,2,3,4]))
+                            
+                            if cur_state and not prev_state and run_on_open:
+                                event_trigger = True
+                            if not cur_state and prev_state and run_on_close:
+                                event_trigger = True
+                            
+                            prev_map[state_key] = cur_state
+                        except Exception:
+                            continue
+                else:
+                    # 기존 구조 (하위 호환)
+                    try:
+                        open_t = datetime.strptime(mh["open"], "%H:%M").time()
+                        close_t = datetime.strptime(mh["close"], "%H:%M").time()
+                        
+                        prev_map = self._last_market_state.setdefault(sid, {})
+                        prev_state = prev_map.get(m, False)
+                        cur_state = (open_t <= now_local.time() <= close_t) and (now_local.weekday() in mh.get("days", [0,1,2,3,4]))
+                        
+                        if cur_state and not prev_state and run_on_open:
+                            event_trigger = True
+                        if not cur_state and prev_state and run_on_close:
+                            event_trigger = True
+                        
+                        prev_map[m] = cur_state
+                    except Exception:
+                        pass
 
             should_run = (time_trigger or elapsed_ok or event_trigger)
 

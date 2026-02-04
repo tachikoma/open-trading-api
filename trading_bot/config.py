@@ -52,11 +52,134 @@ class Config:
     SCHEDULE_INTERVAL_MINUTES = 5  # 5분마다 전략 실행
 
     # 시장 시간 매핑 (전략별/마켓별 스케줄링에 사용)
-    # 필요 시 이 맵을 수정하거나 환경변수 또는 Config로 오버라이드하여 사용하세요.
+    # 방법 2 + 방법 3 혼합: 각 시장별 세션 구분 + 유연한 확장성
+    #
+    # 사용 예시:
+    #   1. 정규장만 거래: market="NYSE"
+    #   2. 전체 시간(Pre + Regular + After): market="NYSE_EXTENDED"
+    #   3. Pre-market만: market="NYSE_PRE"
+    #   4. After-hours만: market="NYSE_AFTER"
+    #   5. 한국 낮 시간 거래: market="NYSE_DAY" (미국 주간거래)
+    #
     MARKET_HOURS = {
-        "KRX": {"tz": "Asia/Seoul", "open": "09:00", "close": "15:30", "days": [0, 1, 2, 3, 4]},
-        "NYSE": {"tz": "US/Eastern", "open": "00:30", "close": "16:00", "days": [0, 1, 2, 3, 4]},
+        # ===== 국내 장 (KRX) =====
+        "KRX": {
+            "tz": "Asia/Seoul",
+            "sessions": {
+                "regular": {"open": "09:00", "close": "15:30"},
+            },
+            "days": [0, 1, 2, 3, 4],  # 월-금
+        },
+
+        # ===== 미국 장 (NYSE/NASDAQ) =====
+        # 미국 시간(US/Eastern 기준):
+        #   - Pre-market:  04:00 ~ 09:30 (개장 전)
+        #   - Regular:     09:30 ~ 16:00 (정규장)
+        #   - After-hours: 16:00 ~ 20:00 (폐장 후)
+        # 
+        # 한국 시간(서머타임 제외, +14시간):
+        #   - Pre-market:  18:00 (전일) ~ 23:30
+        #   - Regular:     23:30 ~ 06:00 (익일)
+        #   - After-hours: 06:00 ~ 10:00
+        #   - Day Market:  10:00 ~ 17:50 (KIS 주간거래)
+
+        "NYSE": {
+            "tz": "US/Eastern",
+            "sessions": {
+                "regular": {"open": "09:30", "close": "16:00"},
+            },
+            "days": [0, 1, 2, 3, 4],  # 월-금
+            "description": "정규장만 (유동성 최고)",
+        },
+
+        "NYSE_PRE": {
+            "tz": "US/Eastern",
+            "sessions": {
+                "pre": {"open": "04:00", "close": "09:30"},
+            },
+            "days": [0, 1, 2, 3, 4],  # 월-금
+            "description": "Pre-market (개장 전, 낮은 유동성)",
+        },
+
+        "NYSE_AFTER": {
+            "tz": "US/Eastern",
+            "sessions": {
+                "after": {"open": "16:00", "close": "20:00"},
+            },
+            "days": [0, 1, 2, 3, 4],  # 월-금
+            "description": "After-hours (폐장 후, 낮은 유동성)",
+        },
+
+        "NYSE_EXTENDED": {
+            "tz": "US/Eastern",
+            "sessions": {
+                "pre": {"open": "04:00", "close": "09:30"},
+                "regular": {"open": "09:30", "close": "16:00"},
+                "after": {"open": "16:00", "close": "20:00"},
+            },
+            "days": [0, 1, 2, 3, 4],  # 월-금
+            "description": "확장 시간대 (전체: 04:00 ~ 20:00)",
+        },
+
+        "NYSE_DAY": {
+            "tz": "Asia/Seoul",  # 한국 시간 기준
+            "sessions": {
+                "day": {"open": "10:00", "close": "17:50"},
+            },
+            "days": [0, 1, 2, 3, 4],  # 월-금
+            "description": "미국 주간거래 (한국 낮 시간, 지정가 주문만, 주간거래까지만 유지)",
+            "restrictions": {
+                "order_type": "limit_only",  # 지정가만 가능
+                "duration": "day_only",       # 주간거래까지만
+                "realtime_quote": "limited",  # 일부 종목 실시간 시세 제한
+            },
+        },
+
+        # ===== NASDAQ (NYSE와 동일한 시간대) =====
+        "NASDAQ": {
+            "tz": "US/Eastern",
+            "sessions": {
+                "regular": {"open": "09:30", "close": "16:00"},
+            },
+            "days": [0, 1, 2, 3, 4],  # 월-금
+            "description": "정규장만",
+        },
+
+        "NASDAQ_EXTENDED": {
+            "tz": "US/Eastern",
+            "sessions": {
+                "pre": {"open": "04:00", "close": "09:30"},
+                "regular": {"open": "09:30", "close": "16:00"},
+                "after": {"open": "16:00", "close": "20:00"},
+            },
+            "days": [0, 1, 2, 3, 4],  # 월-금
+            "description": "확장 시간대 (전체: 04:00 ~ 20:00)",
+        },
     }
+
+    @staticmethod
+    def get_market_session(market: str, session_name: str = "regular") -> dict:
+        """
+        특정 시장의 세션 정보 조회 헬퍼 함수
+
+        Args:
+            market: 시장명 (예: "NYSE", "KRX")
+            session_name: 세션명 (예: "regular", "pre", "after"). 생략하면 "regular"
+
+        Returns:
+            {"open": "HH:MM", "close": "HH:MM"} 형태의 dict, 없으면 None
+
+        Example:
+            >>> Config.get_market_session("NYSE")
+            {'open': '09:30', 'close': '16:00'}
+            >>> Config.get_market_session("NYSE", "pre")
+            {'open': '04:00', 'close': '09:30'}
+        """
+        market_config = Config.MARKET_HOURS.get(market)
+        if not market_config:
+            return None
+        sessions = market_config.get("sessions", {})
+        return sessions.get(session_name)
 
     # 주문 설정
     MAX_POSITION_SIZE = 1000000  # 최대 투자 금액 (100만원)
@@ -225,7 +348,7 @@ class Config:
             "name": "infinite_buy",
             "config": {
                 "version": "v2.2",
-                "markets": "NYSE",
+                "markets": ["NYSE", "NYSE_DAY"],
                 # 권장(필수): 심볼별 설정 맵 (키: 티커, 값: {"total_amount":..., "splits": ...})
                 # 예시: 각 티커마다 총투자금(total_amount)과 분할횟수(splits)를 반드시 명시하세요.
                 "symbols": {
