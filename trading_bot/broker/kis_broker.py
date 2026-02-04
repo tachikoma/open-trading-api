@@ -1029,7 +1029,7 @@ class KISBroker:
     
     def get_balance(self) -> Optional[Tuple[pd.DataFrame, pd.DataFrame]]:
         """
-        잔고 조회
+        잔고 조회 (국내 주식)
         
         Returns:
             (보유종목 DataFrame, 계좌요약 DataFrame)
@@ -1051,6 +1051,34 @@ class KISBroker:
             return df1, df2
         except Exception as e:
             self.logger.error(f"잔고 조회 실패: {e}")
+            return None, None
+    
+    def get_balance_overseas(self, ovrs_excg_cd: str = "NASD", tr_crcy_cd: str = "USD") -> Optional[Tuple[pd.DataFrame, pd.DataFrame]]:
+        """
+        해외 주식 잔고 조회
+        
+        Args:
+            ovrs_excg_cd: 해외거래소코드 (NASD:나스닥, NYSE:뉴욕, AMEX:아멕스, SEHK:홍콩 등)
+            tr_crcy_cd: 거래통화코드 (USD:미국달러, HKD:홍콩달러, CNY:중국위안화, JPY:일본엔화, VND:베트남동)
+        
+        Returns:
+            (보유종목 DataFrame, 계좌요약 DataFrame)
+        """
+        try:
+            df1, df2 = self._call_with_retry(
+                osf.inquire_balance,
+                cano=self.account,
+                acnt_prdt_cd=self.product_code,
+                ovrs_excg_cd=ovrs_excg_cd,
+                tr_crcy_cd=tr_crcy_cd,
+                FK200="",
+                NK200="",
+                env_dv=self.env_mode,
+                check_result=self._check_retry_on_rate_limit_only
+            )
+            return df1, df2
+        except Exception as e:
+            self.logger.error(f"해외 주식 잔고 조회 실패 (거래소: {ovrs_excg_cd}, 통화: {tr_crcy_cd}): {e}")
             return None, None
     
     def get_buyable_cash(self, symbol: str = "", price: int = 0) -> Optional[int]:

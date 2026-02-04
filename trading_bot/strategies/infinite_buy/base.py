@@ -204,101 +204,25 @@ class InfiniteBuyBase(ABC):
         return 0.0
 
     def execute(self):
-        """공통 실행 진입점: 현재가/잔고를 조회해 `decide_buy`/`decide_sell`로 의도를 생성하고
-        `broker.execute_intents`로 전달하여 실행합니다.
+        """실행 진입점: 환경별(모의투자/실전투자) 전략에 따라 실행
 
-        - symbols: self.config['symbols'] 우선, 없으면 전역 Config.WATCH_LIST 사용
-        - 매수 의도는 `decide_buy(date, quote)` 호출로 생성
-        - 매도 의도는 보유 포지션을 순회하며 `decide_sell(position, market_price)` 호출로 생성
+        - 모의투자(demo): 지정가만 가능 → 시간대별 재주문 (Pre/Regular/After 각각)
+        - 실전투자(real): LOC/MOC 지원 → 하루 1회만 실행 (자동 실행)
         """
         try:
-            self.logger.info("=" * 50)
-            self.logger.info(f"{self.__class__.__name__} 실행 시작")
-            self.logger.info("=" * 50)
-
-            # symbols 결정: InfiniteBuy 전략은 미국(해외) 전용 전략이므로
-            # 전역 `Config.WATCH_LIST`를 기본값으로 사용하지 않습니다.
-            # 반드시 인스턴스 설정(self.config['symbols'] 또는 self.config['watch_list'])으로 지정하세요.
-            symbols = self.config.get('symbols') or self.config.get('watch_list') or []
-            if not symbols:
-                self.logger.info("심볼이 설정되지 않음 — InfiniteBuy는 self.config['symbols']를 필요로 합니다. 실행을 건너뜁니다.")
-                return
-
-            date_str = datetime.now(pytz.timezone('Asia/Seoul')).strftime("%Y-%m-%d")
-
-            intents: List[Dict[str, Any]] = []
-
-            # 매수 의도 수집
-            for sym in symbols:
-                try:
-                    price_df = None
-                    if self.broker is not None:
-                        # InfiniteBuy는 해외(미국) 주식 전용 전략이므로 해외 현재가 조회 사용
-                        if hasattr(self.broker, 'get_current_price_overseas'):
-                            # 심볼별 설정에서 거래소 코드 가져오기 (기본값: NAS)
-                            cfg = self.cfg_for(sym)
-                            exch = cfg.get('exchange', 'NAS')
-                            price_df = self.broker.get_current_price_overseas(sym, exch=exch)
-                        elif hasattr(self.broker, 'get_current_price'):
-                            # 폴백: 기존 메서드 사용 (하위 호환)
-                            price_df = self.broker.get_current_price(sym)
-                    price = self._extract_price_from_df(price_df)
-                    if price <= 0:
-                        self.logger.debug(f"{sym}: 현재가 없음 또는 0, 스킵")
-                        continue
-                    quote = {'symbol': sym, 'price': price}
-                    buy_intents = self.decide_buy(date_str, quote) or []
-                    if isinstance(buy_intents, dict):
-                        buy_intents = [buy_intents]
-                    intents.extend(buy_intents)
-                except Exception as e:
-                    self.logger.error(f"{sym}: 매수 의도 생성 중 오류: {e}")
-
-            # 매도 의도 수집: 보유 포지션 기반
-            try:
-                if self.broker is not None and hasattr(self.broker, 'get_balance'):
-                    holdings_df, _ = self.broker.get_balance()
-                    if holdings_df is not None:
-                        # iterate rows if DataFrame-like
-                        try:
-                            import pandas as _pd
-                            if isinstance(holdings_df, _pd.DataFrame) and not holdings_df.empty:
-                                for _, row in holdings_df.iterrows():
-                                    try:
-                                        pos = {
-                                            'symbol': row.get('pdno') or row.get('symbol') or row.get('pd_no'),
-                                            'quantity': float(row.get('hldg_qty') or row.get('quantity') or 0),
-                                            'avg_price': float(row.get('avg_prc') or row.get('avg_price') or row.get('price') or 0),
-                                            'cum_buy_amt': float(self.get_cum_buy(row.get('pdno') or row.get('symbol') or row.get('pd_no'))),
-                                        }
-                                        market_price = None
-                                        try:
-                                            market_price = float(row.get('last') or row.get('stck_prpr') or None)
-                                        except Exception:
-                                            market_price = None
-                                        sell_intents = self.decide_sell(pos, market_price) or []
-                                        if isinstance(sell_intents, dict):
-                                            sell_intents = [sell_intents]
-                                        intents.extend(sell_intents)
-                                    except Exception:
-                                        continue
-                        except Exception:
-                            pass
-            except Exception:
-                pass
-
-            if not intents:
-                self.logger.info("생성된 의도 없음 — 실행 종료")
-                return
-
-            # 실행 (브로커가 TRADING_ENABLED를 검사하므로 simulate_only=False)
-            try:
-                results = self.broker.execute_intents(intents, strategy=self, simulate_only=False)
-                self.logger.info(f"의도 실행 결과 개수: {len(results)}")
-            except Exception as e:
-                self.logger.error(f"execute_intents 호출 중 오류: {e}")
-
+            # 환경 확인
+            env_mode = self.broker.env_mode if self.broker else "demo"
+            
+            if env_mode == "demo":
+                # 모의투자: 시간대별 재주문
+                from trading_bot.strategies.infinite_buy.impl_demo import InfiniteBuyDemoImpl
+                impl = InfiniteBuyDemoImpl(self)
+                impl.execute()
+            else:
+                # 실전투자: 하루 1회만
+                from trading_bot.strategies.infinite_buy.impl_real import InfiniteBuyRealImpl
+                impl = InfiniteBuyRealImpl(self)
+                impl.execute()
+        
         except Exception as e:
             self.logger.error(f"execute() 오류: {e}")
-        finally:
-            self.logger.info(f"{self.__class__.__name__} 실행 완료")
