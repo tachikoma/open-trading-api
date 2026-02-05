@@ -91,7 +91,7 @@ def _html_escape(s: str) -> str:
 
 
 def notify_order(action: str, symbol: str, qty: int, price: int, success: bool, 
-                 message: Optional[str] = None, order_id: Optional[str] = None):
+                 message: Optional[str] = None, order_id: Optional[str] = None, currency: str = "KRW"):
     """주문 알림 메시지를 HTML 안전하게 포맷하여 전송합니다.
 
     인자:
@@ -102,6 +102,7 @@ def notify_order(action: str, symbol: str, qty: int, price: int, success: bool,
         success: 성공 여부
         message: 선택적 상세 메시지
         order_id: 선택적 주문 ID
+        currency: 통화 ('KRW', 'USD' 등). 기본값 'KRW'
     """
     display = format_symbol(symbol)
     status = "성공" if success else "실패"
@@ -109,7 +110,7 @@ def notify_order(action: str, symbol: str, qty: int, price: int, success: bool,
     display_e = _html_escape(display)
     msg_parts = [f"<b>{_html_escape(action)}</b> {display_e}"]
     formatted_qty = format_quantity(qty)
-    formatted_price = format_price(price, currency="KRW")
+    formatted_price = format_price(price, currency=currency)
     msg_parts.append(f"qty={_html_escape(formatted_qty)} price={_html_escape(formatted_price)} — <b>{_html_escape(status)}</b>")
     if order_id:
         msg_parts.append(f"Order ID: <code>{_html_escape(str(order_id))}</code>")
