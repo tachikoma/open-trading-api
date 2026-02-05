@@ -1150,7 +1150,6 @@ class KISBroker:
             )
             
             self.logger.info(f"매수 주문 완료: {symbol}, 수량: {qty}, 가격: {price}")
-            # 알림 전송 (성공)
             # 시도: result에서 주문ID 추출
             order_id = None
             try:
@@ -1174,12 +1173,11 @@ class KISBroker:
                                 break
                 except Exception:
                     pass
-
+            # 알림 전송 (성공)
             try:
                 notify_order("BUY", symbol, qty, price, True, order_id=order_id)
             except Exception:
                 pass
-
             # 수수료/세금 계산: 가격이 0(시장가)이면 응답에서 체결가를 시도 추출
             exec_price = price
             try:
@@ -1196,7 +1194,6 @@ class KISBroker:
                                 break
             except Exception:
                 pass
-
             fees = calculate_fees_and_taxes(exec_price or 0, qty, side="buy")
             return self._format_order_response(True, result, qty=qty, price=exec_price or price, order_id=order_id, side="buy", fees=fees)
         except Exception as e:
@@ -1241,36 +1238,36 @@ class KISBroker:
             )
             
             self.logger.info(f"매도 주문 완료: {symbol}, 수량: {qty}, 가격: {price}")
-            # 알림 전송 (성공)
+            
+            # 시도: result에서 주문ID 추출
+            order_id = None
             try:
-                # 시도: result에서 주문ID 추출
-                order_id = None
+                import pandas as _pd
+                if isinstance(result, _pd.DataFrame) and not result.empty:
+                    for col in ("ord_no", "ordno", "odno", "orgn_odno", "order_no", "orderId", "order_id"):
+                        if col in result.columns:
+                            v = result.iloc[0].get(col)
+                            if v:
+                                order_id = str(v)
+                                break
+            except Exception:
+                pass
+            if not order_id:
                 try:
-                    import pandas as _pd
-                    if isinstance(result, _pd.DataFrame) and not result.empty:
-                        for col in ("ord_no", "ordno", "odno", "orgn_odno", "order_no", "orderId", "order_id"):
-                            if col in result.columns:
-                                v = result.iloc[0].get(col)
-                                if v:
-                                    order_id = str(v)
-                                    break
+                    if isinstance(result, dict):
+                        for k in ("order_no", "ord_no", "odno", "orgn_odno", "ordno", "orderId", "order_id"):
+                            v = result.get(k)
+                            if v:
+                                order_id = str(v)
+                                break
                 except Exception:
                     pass
-                if not order_id:
-                    try:
-                        if isinstance(result, dict):
-                            for k in ("order_no", "ord_no", "odno", "orgn_odno", "ordno", "orderId", "order_id"):
-                                v = result.get(k)
-                                if v:
-                                    order_id = str(v)
-                                    break
-                    except Exception:
-                        pass
-
+            
+            # 알림 전송 (성공)
+            try:
                 notify_order("SELL", symbol, qty, price, True, order_id=order_id)
             except Exception:
                 pass
-
             # 수수료/세금 계산: 가격이 0(시장가)이면 응답에서 체결가를 시도 추출
             exec_price = price
             try:
@@ -1287,7 +1284,6 @@ class KISBroker:
                                 break
             except Exception:
                 pass
-
             fees = calculate_fees_and_taxes(exec_price or 0, qty, side="sell")
             return self._format_order_response(True, result, qty=qty, price=exec_price or price, order_id=order_id, side="sell", fees=fees)
         except Exception as e:
