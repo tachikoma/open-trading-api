@@ -239,3 +239,90 @@ def is_any_market_open(market_list: list) -> bool:
             return True
     
     return False
+
+
+def get_market_status(market_name: str) -> str:
+    """
+    특정 시장의 현재 상태 반환
+    
+    Args:
+        market_name: 시장명 (예: "NYSE_DAY", "NYSE_EXTENDED", "NYSE")
+    
+    Returns:
+        'open': 개장 중 (일반 시장)
+        'day_trading': 주간거래 중 (NYSE_DAY 전용)
+        'closed': 폐장
+    
+    Example:
+        >>> get_market_status("NYSE_DAY")  # 한국 낮 12시
+        'day_trading'
+        >>> get_market_status("NYSE_EXTENDED")  # 미국 밤 10시
+        'closed'
+        >>> get_market_status("NYSE")  # 미국 정규장 중
+        'open'
+    """
+    if is_market_session_open(market_name):
+        # NYSE_DAY는 특별히 'day_trading'으로 표시
+        if market_name == "NYSE_DAY":
+            return 'day_trading'
+        return 'open'
+    return 'closed'
+
+
+def get_markets_status_summary(market_list: list) -> dict:
+    """
+    여러 시장의 상태를 요약하여 반환
+    
+    Args:
+        market_list: 시장명 리스트 (예: ["NYSE_EXTENDED", "NYSE_DAY"])
+    
+    Returns:
+        딕셔너리:
+        {
+            'markets': {
+                'NYSE_EXTENDED': 'closed',
+                'NYSE_DAY': 'day_trading'
+            },
+            'any_open': True,           # 하나라도 개장 중
+            'all_open': False,          # 모두 개장 중
+            'open_markets': ['NYSE_DAY'],
+            'closed_markets': ['NYSE_EXTENDED']
+        }
+    
+    Example:
+        >>> status = get_markets_status_summary(["NYSE_EXTENDED", "NYSE_DAY"])
+        >>> print(status['open_markets'])
+        ['NYSE_DAY']
+        >>> print(status['any_open'])
+        True
+    """
+    if not market_list:
+        return {
+            'markets': {},
+            'any_open': False,
+            'all_open': False,
+            'open_markets': [],
+            'closed_markets': []
+        }
+    
+    markets_status = {}
+    open_markets = []
+    closed_markets = []
+    
+    for market_name in market_list:
+        status = get_market_status(market_name)
+        markets_status[market_name] = status
+        
+        # 'open' 또는 'day_trading' 모두 개장 중으로 간주
+        if status in ('open', 'day_trading'):
+            open_markets.append(market_name)
+        else:
+            closed_markets.append(market_name)
+    
+    return {
+        'markets': markets_status,
+        'any_open': len(open_markets) > 0,
+        'all_open': len(closed_markets) == 0,
+        'open_markets': open_markets,
+        'closed_markets': closed_markets
+    }

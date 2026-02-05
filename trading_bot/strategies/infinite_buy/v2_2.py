@@ -1,6 +1,7 @@
 from .base import InfiniteBuyBase
 import math
 from typing import Any, Dict, List
+from trading_bot.utils.format import format_price
 
 
 class InfiniteBuyV2_2(InfiniteBuyBase):
@@ -107,7 +108,7 @@ class InfiniteBuyV2_2(InfiniteBuyBase):
         star_pct = self.compute_star_percent(T, symbol)
         target_star = price * (1.0 + float(star_pct) / 100.0)
         self.logger.debug("decide_buy: metrics symbol=%s price=%s cum_buy=%s T=%s star_pct=%s target_star=%s",
-                  symbol, price, cum_buy, T, star_pct, round(float(target_star), 2))
+                  symbol, format_price(price, "USD"), cum_buy, T, star_pct, format_price(target_star, "USD"))
 
         # 모든 매수 주문은 LOC 타입으로 처리
         order_type = "LOC"

@@ -13,7 +13,9 @@ from trading_bot.utils.market_time import (
     get_us_market_time,
     get_market_phase,
     is_any_market_open,
+    get_markets_status_summary,
 )
+from trading_bot.utils.format import format_price
 
 
 class InfiniteBuyRealImpl:
@@ -57,18 +59,30 @@ class InfiniteBuyRealImpl:
             if current_phase == 'closed':
                 self.logger.info(f"실전투자: 시장 폐장 중 ({us_time.strftime('%H:%M:%S')})")
                 return False, current_phase, last_exec_date
-        else:
-            # 설정된 markets 중 하나라도 개장 중인지 체크
-            if not is_any_market_open(markets):
-                self.logger.info(
-                    f"실전투자: 설정된 모든 시장 폐장 중 "
-                    f"(markets={markets}, 시간={us_time.strftime('%H:%M:%S')})"
-                )
-                return False, current_phase, last_exec_date
             else:
                 self.logger.info(
                     f"실전투자: 시장 개장 중 "
-                    f"(markets={markets}, 시간={us_time.strftime('%H:%M:%S')})"
+                    f"(시간대={current_phase}, 시간={us_time.strftime('%H:%M:%S')})"
+                )
+        else:
+            # 설정된 markets의 상태를 상세히 체크
+            status_summary = get_markets_status_summary(markets)
+            
+            if not status_summary['any_open']:
+                # 모든 시장이 폐장 중
+                markets_detail = ', '.join([f"{m}={status_summary['markets'][m]}" for m in markets])
+                self.logger.info(
+                    f"실전투자: 설정된 모든 시장 폐장 중 "
+                    f"(시장상태=[{markets_detail}], 시간대={current_phase}, 시간={us_time.strftime('%H:%M:%S')})"
+                )
+                return False, current_phase, last_exec_date
+            else:
+                # 하나 이상의 시장이 개장 중
+                open_detail = ', '.join([f"{m}={status_summary['markets'][m]}" for m in status_summary['open_markets']])
+                closed_detail = ', '.join(status_summary['closed_markets']) if status_summary['closed_markets'] else '없음'
+                self.logger.info(
+                    f"실전투자: 시장 개장 중 "
+                    f"(개장중=[{open_detail}], 폐장=[{closed_detail}], 시간={us_time.strftime('%H:%M:%S')})"
                 )
         
         return True, current_phase, last_exec_date
@@ -99,7 +113,42 @@ class InfiniteBuyRealImpl:
                 self.logger.info("심볼이 설정되지 않음 — 실행을 건너뜁니다.")
                 return False
             
-            self.logger.info(f"현재 시간대: {current_phase} ({us_time.strftime('%H:%M:%S')})")
+            # 시장 상태를 명확히 표시
+            markets = self.config.get('markets', [])
+            if isinstance(markets, str):
+                markets = [markets]
+            
+            if markets:
+                from trading_bot.utils.market_time import get_markets_status_summary
+                from datetime import datetime
+                import pytz
+                
+                status_summary = get_markets_status_summary(markets)
+                kr_time = datetime.now(pytz.timezone('Asia/Seoul'))
+                
+                # 거래 가능 상태 요약
+                if status_summary['any_open']:
+                    open_markets_desc = []
+                    for m in status_summary['open_markets']:
+                        status = status_summary['markets'][m]
+                        if status == 'day_trading':
+                            open_markets_desc.append(f"한국주간거래({m})")
+                        else:
+                            open_markets_desc.append(m)
+                    
+                    self.logger.info(
+                        f"거래 가능: {', '.join(open_markets_desc)} | "
+                        f"US {us_time.strftime('%H:%M')} | KR {kr_time.strftime('%H:%M')}"
+                    )
+                else:
+                    self.logger.info(
+                        f"거래 불가: 모든 시장 폐장 | "
+                        f"US {us_time.strftime('%H:%M')} ({current_phase}) | KR {kr_time.strftime('%H:%M')}"
+                    )
+            else:
+                # markets 설정이 없으면 기존 방식
+                self.logger.info(f"미국 시장 시간대: {current_phase} (US/Eastern {us_time.strftime('%H:%M:%S')})")
+            
             self.logger.info(f"대상 심볼: {list(symbols.keys()) if isinstance(symbols, dict) else symbols}")
             
             intents: List[Dict[str, Any]] = []
@@ -181,8 +230,9 @@ class InfiniteBuyRealImpl:
                 for idx, intent in enumerate(transformed_intents, 1):
                     order_type_name = order_manager.get_order_type_name(intent.get('order_type', '00'))
                     original = intent.get('original_order_type', intent.get('order_type', '00'))
+                    price_formatted = format_price(intent.get('price', 0), "USD") if intent.get('price') else "N/A"
                     self.logger.info(f"  [{idx}] {intent.get('type')} {intent.get('symbol')} "
-                                   f"수량:{intent.get('quantity')} 가격:{intent.get('price')} "
+                                   f"수량:{intent.get('quantity')} 가격:{price_formatted} "
                                    f"원본:{original} → 변환:{order_type_name}")
                 
                 # 실행

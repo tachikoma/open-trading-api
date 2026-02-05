@@ -348,7 +348,7 @@ class Config:
             "name": "infinite_buy",
             "config": {
                 "version": "v2.2",
-                "markets": ["NYSE", "NYSE_DAY"],
+                "markets": ["NYSE_EXTENDED", "NYSE_DAY"],
                 # 권장(필수): 심볼별 설정 맵 (키: 티커, 값: {"total_amount":..., "splits": ...})
                 # 예시: 각 티커마다 총투자금(total_amount)과 분할횟수(splits)를 반드시 명시하세요.
                 "symbols": {

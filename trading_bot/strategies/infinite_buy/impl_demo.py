@@ -10,6 +10,7 @@ from typing import Any, Dict, List
 from datetime import datetime
 import pytz
 from trading_bot.utils.market_time import get_us_market_time, get_market_phase
+from trading_bot.utils.format import format_price
 
 
 class InfiniteBuyDemoImpl:
@@ -73,7 +74,15 @@ class InfiniteBuyDemoImpl:
                 self.logger.info("심볼이 설정되지 않음 — 실행을 건너뜁니다.")
                 return False
             
-            self.logger.info(f"현재 시간대: {current_phase} ({us_time.strftime('%H:%M:%S')})")
+            # 시장 상태 표시 (간단 버전)
+            from datetime import datetime
+            import pytz
+            kr_time = datetime.now(pytz.timezone('Asia/Seoul'))
+            
+            self.logger.info(
+                f"거래 시간대: {current_phase} | "
+                f"US {us_time.strftime('%H:%M')} | KR {kr_time.strftime('%H:%M')}"
+            )
             self.logger.info(f"대상 심볼: {list(symbols.keys()) if isinstance(symbols, dict) else symbols}")
             
             intents: List[Dict[str, Any]] = []
