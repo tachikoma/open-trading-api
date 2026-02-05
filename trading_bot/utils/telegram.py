@@ -19,6 +19,7 @@ except Exception:
 
 from trading_bot.config import Config
 from trading_bot.utils.symbols import format_symbol
+from trading_bot.utils.format import format_quantity, format_price
 
 logger = logging.getLogger("Telegram")
 
@@ -89,7 +90,8 @@ def _html_escape(s: str) -> str:
              .replace(">", "&gt;"))
 
 
-def notify_order(action: str, symbol: str, qty: int, price: int, success: bool, message: Optional[str] = None, order_id: Optional[str] = None):
+def notify_order(action: str, symbol: str, qty: int, price: int, success: bool,
+                 message: Optional[str] = None, order_id: Optional[str] = None):
     """주문 알림 메시지를 HTML 안전하게 포맷하여 전송합니다.
 
     인자:
@@ -106,7 +108,9 @@ def notify_order(action: str, symbol: str, qty: int, price: int, success: bool, 
     # HTML 이스케이프 처리
     display_e = _html_escape(display)
     msg_parts = [f"<b>{_html_escape(action)}</b> {display_e}"]
-    msg_parts.append(f"qty={_html_escape(str(qty))} price={_html_escape(str(price))} — <b>{_html_escape(status)}</b>")
+    formatted_qty = format_quantity(qty)
+    formatted_price = format_price(price, currency="KRW")
+    msg_parts.append(f"qty={_html_escape(formatted_qty)} price={_html_escape(formatted_price)} — <b>{_html_escape(status)}</b>")
     if order_id:
         msg_parts.append(f"Order ID: <code>{_html_escape(str(order_id))}</code>")
     if message:
