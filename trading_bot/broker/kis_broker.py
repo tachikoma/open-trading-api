@@ -1175,7 +1175,7 @@ class KISBroker:
                     pass
             # 알림 전송 (성공)
             try:
-                notify_order("BUY", symbol, qty, price, True, order_id=order_id)
+                notify_order("BUY", symbol, qty, price, True, order_id=order_id, currency="KRW")
             except Exception:
                 pass
             # 수수료/세금 계산: 가격이 0(시장가)이면 응답에서 체결가를 시도 추출
@@ -1200,7 +1200,7 @@ class KISBroker:
             self.logger.error(f"매수 주문 실패 ({symbol}): {e}")
             # 알림 전송 (실패)
             try:
-                notify_order("BUY", symbol, qty, price, False, message=str(e))
+                notify_order("BUY", symbol, qty, price, False, message=str(e), currency="KRW")
             except Exception:
                 pass
             return self._format_order_response(False, None, qty=qty, price=price, side="buy", message=str(e))
@@ -1265,7 +1265,7 @@ class KISBroker:
             
             # 알림 전송 (성공)
             try:
-                notify_order("SELL", symbol, qty, price, True, order_id=order_id)
+                notify_order("SELL", symbol, qty, price, True, order_id=order_id, currency="KRW")
             except Exception:
                 pass
             # 수수료/세금 계산: 가격이 0(시장가)이면 응답에서 체결가를 시도 추출
@@ -1290,7 +1290,7 @@ class KISBroker:
             self.logger.error(f"매도 주문 실패 ({symbol}): {e}")
             # 알림 전송 (실패)
             try:
-                notify_order("SELL", symbol, qty, price, False, message=str(e))
+                notify_order("SELL", symbol, qty, price, False, message=str(e), currency="KRW")
             except Exception:
                 pass
             return self._format_order_response(False, None, qty=qty, price=price, side="sell", message=str(e))
