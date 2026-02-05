@@ -9,7 +9,11 @@ InfiniteBuy 실전투자(Real) 전용 실행 로직
 from typing import Any, Dict, List
 from datetime import datetime
 import pytz
-from trading_bot.utils.market_time import get_us_market_time, get_market_phase
+from trading_bot.utils.market_time import (
+    get_us_market_time,
+    get_market_phase,
+    is_any_market_open,
+)
 
 
 class InfiniteBuyRealImpl:
@@ -43,10 +47,29 @@ class InfiniteBuyRealImpl:
             self.logger.info(f"실전투자: 오늘({date_str}) 이미 실행됨 (스킵)")
             return False, current_phase, last_exec_date
         
-        # 시장이 폐장 중이면 실행 불가
-        if current_phase == 'closed':
-            self.logger.info(f"실전투자: 시장 폐장 중 ({us_time.strftime('%H:%M:%S')})")
-            return False, current_phase, last_exec_date
+        # 시장 개장 여부 체크 (설정된 markets 중 하나라도 개장 중이면 OK)
+        markets = self.config.get('markets', [])
+        if isinstance(markets, str):
+            markets = [markets]
+        
+        # markets가 비어있으면 기존 방식(US/Eastern 기준) 사용
+        if not markets:
+            if current_phase == 'closed':
+                self.logger.info(f"실전투자: 시장 폐장 중 ({us_time.strftime('%H:%M:%S')})")
+                return False, current_phase, last_exec_date
+        else:
+            # 설정된 markets 중 하나라도 개장 중인지 체크
+            if not is_any_market_open(markets):
+                self.logger.info(
+                    f"실전투자: 설정된 모든 시장 폐장 중 "
+                    f"(markets={markets}, 시간={us_time.strftime('%H:%M:%S')})"
+                )
+                return False, current_phase, last_exec_date
+            else:
+                self.logger.info(
+                    f"실전투자: 시장 개장 중 "
+                    f"(markets={markets}, 시간={us_time.strftime('%H:%M:%S')})"
+                )
         
         return True, current_phase, last_exec_date
     

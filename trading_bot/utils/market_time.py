@@ -150,3 +150,92 @@ def is_weekday(us_time: datetime = None) -> bool:
         us_time = get_us_market_time()
     
     return us_time.weekday() < 5  # 0-4: Mon-Fri
+
+
+def is_market_session_open(market_name: str) -> bool:
+    """
+    Config.MARKET_HOURS 기반으로 특정 시장의 개장 여부 체크
+    
+    Args:
+        market_name: 시장명 (예: "NYSE", "NYSE_DAY", "KRX" 등)
+    
+    Returns:
+        해당 시장이 현재 개장 중이면 True, 아니면 False
+    
+    Example:
+        >>> is_market_session_open("NYSE")  # 미국 동부 시간 기준
+        True
+        >>> is_market_session_open("NYSE_DAY")  # 한국 시간 기준
+        True
+    """
+    # Config import는 함수 내부에서 (순환 참조 방지)
+    from trading_bot.config import Config
+    
+    market_config = Config.MARKET_HOURS.get(market_name)
+    if not market_config:
+        # 알 수 없는 시장명이면 False
+        return False
+    
+    # 시간대 가져오기
+    tz_str = market_config.get("tz", "US/Eastern")
+    tz = pytz.timezone(tz_str)
+    now = datetime.now(tz)
+    
+    # 평일(days) 체크
+    allowed_days = market_config.get("days", [0, 1, 2, 3, 4])
+    if now.weekday() not in allowed_days:
+        return False
+    
+    # 세션(sessions) 체크: 하나라도 개장 중이면 True
+    sessions = market_config.get("sessions", {})
+    if not sessions:
+        return False
+    
+    current_time_minutes = now.hour * 60 + now.minute
+    
+    for session_name, session_info in sessions.items():
+        open_str = session_info.get("open")  # "HH:MM"
+        close_str = session_info.get("close")
+        
+        if not open_str or not close_str:
+            continue
+        
+        # 시간 파싱
+        try:
+            open_h, open_m = map(int, open_str.split(":"))
+            close_h, close_m = map(int, close_str.split(":"))
+        except Exception:
+            continue
+        
+        open_minutes = open_h * 60 + open_m
+        close_minutes = close_h * 60 + close_m
+        
+        # 개장~폐장 사이인지 체크
+        if open_minutes <= current_time_minutes < close_minutes:
+            return True
+    
+    return False
+
+
+def is_any_market_open(market_list: list) -> bool:
+    """
+    여러 시장 중 하나라도 개장 중인지 체크
+    
+    Args:
+        market_list: 시장명 리스트 (예: ["NYSE_EXTENDED", "NYSE_DAY"])
+    
+    Returns:
+        하나라도 개장 중이면 True, 모두 폐장이면 False
+    
+    Example:
+        >>> is_any_market_open(["NYSE_EXTENDED", "NYSE_DAY"])
+        True  # 둘 중 하나라도 열려있으면
+    """
+    if not market_list:
+        return False
+    
+    for market_name in market_list:
+        if is_market_session_open(market_name):
+            return True
+    
+    return False
