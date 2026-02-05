@@ -189,7 +189,25 @@ class OrderManager:
             return False
     
     def get_order_type_name(self, order_type: str) -> str:
-        """주문 유형 코드를 한글 이름으로 변환"""
+        """주문 유형 코드를 한글 이름으로 변환
+        
+        문자열 주문 유형(LOC, MOC 등)과 숫자 코드(34, 33 등) 모두 지원
+        """
+        # 먼저 문자열 → 숫자 코드 변환 시도
+        string_to_code = {
+            'LIMIT': '00',
+            'LOO': '32',
+            'LOC': '34',
+            'MOO': '31',
+            'MOC': '33',
+        }
+        
+        # 대소문자 구분 없이 변환
+        order_type_upper = (order_type or '').upper()
+        if order_type_upper in string_to_code:
+            order_type = string_to_code[order_type_upper]
+        
+        # 숫자 코드 → 한글 이름 변환
         order_type_map = {
             '00': '지정가',
             '31': 'MOO(장개시시장가)',
