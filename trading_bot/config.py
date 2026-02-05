@@ -352,8 +352,8 @@ class Config:
                 # 권장(필수): 심볼별 설정 맵 (키: 티커, 값: {"total_amount":..., "splits": ...})
                 # 예시: 각 티커마다 총투자금(total_amount)과 분할횟수(splits)를 반드시 명시하세요.
                 "symbols": {
-                    "TQQQ": {"total_amount": 300000, "splits": 30},
-                    "SOXL": {"exchange":"AMS", "total_amount": 500000, "splits": 20},
+                    "TQQQ": {"total_amount": 8000, "splits": 40},
+                    "SOXL": {"exchange":"AMS", "total_amount": 5000, "splits": 30},
                 },
             },
         },
