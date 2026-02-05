@@ -149,7 +149,19 @@ class InfiniteBuyRealImpl:
                 # markets 설정이 없으면 기존 방식
                 self.logger.info(f"미국 시장 시간대: {current_phase} (US/Eastern {us_time.strftime('%H:%M:%S')})")
             
-            self.logger.info(f"대상 심볼: {list(symbols.keys()) if isinstance(symbols, dict) else symbols}")
+            # 대상 심볼 정보 출력 (시드 및 분할수 포함)
+            symbol_list = list(symbols.keys()) if isinstance(symbols, dict) else symbols
+            self.logger.info(f"대상 심볼 ({len(symbol_list)}개):")
+            for sym in symbol_list:
+                cfg = self.strategy.cfg_for(sym)
+                total_amount = cfg.get('total_amount', 'N/A')
+                splits = cfg.get('splits', 'N/A')
+                # 시드를 달러로 표시 (정수)
+                if isinstance(total_amount, (int, float)) and total_amount != 'N/A':
+                    seed_display = f"${int(total_amount):,}"
+                else:
+                    seed_display = str(total_amount)
+                self.logger.info(f"  • {sym}: 시드={seed_display}, 분할수={splits}")
             
             intents: List[Dict[str, Any]] = []
             
