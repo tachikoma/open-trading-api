@@ -1131,7 +1131,7 @@ class KISBroker:
             주문 결과 dict
         """
         if not Config.TRADING_ENABLED:
-            self.logger.warning(f"[DRY RUN] 매수 주문: {symbol}, 수량: {qty}, 가격: {price}")
+            self.logger.warning(f"[DRY RUN] 매수 주문: {symbol}, 수량: {qty}, 가격: ₩{price:,.0f}")
             return self._format_order_response(False, None, qty=qty, price=price, side="buy", message="TRADING_ENABLED=False")
         
         try:
@@ -1219,7 +1219,7 @@ class KISBroker:
             주문 결과 dict
         """
         if not Config.TRADING_ENABLED:
-            self.logger.warning(f"[DRY RUN] 매도 주문: {symbol}, 수량: {qty}, 가격: {price}")
+            self.logger.warning(f"[DRY RUN] 매도 주문: {symbol}, 수량: {qty}, 가격: ₩{price:,.0f}")
             return self._format_order_response(False, None, qty=qty, price=price, side="sell", message="TRADING_ENABLED=False")
         
         try:
@@ -1367,7 +1367,7 @@ class KISBroker:
             ovrs_excg_cd: 거래소 코드(예: 'NASD'). 미지정 시 기본 'NASD' 사용
         """
         if not Config.TRADING_ENABLED:
-            self.logger.warning(f"[DRY RUN] 해외 매수 주문: {symbol}, qty={qty}, price={price}, type={order_type}")
+            self.logger.warning(f"[DRY RUN] 해외 매수 주문: {symbol}, qty={qty}, price=${price:.2f}, type={order_type}")
             return {"success": False, "message": "TRADING_ENABLED=False"}
 
         try:
@@ -1402,7 +1402,7 @@ class KISBroker:
         """해외주식 매도 주문 래퍼
         """
         if not Config.TRADING_ENABLED:
-            self.logger.warning(f"[DRY RUN] 해외 매도 주문: {symbol}, qty={qty}, price={price}, type={order_type}")
+            self.logger.warning(f"[DRY RUN] 해외 매도 주문: {symbol}, qty={qty}, price=${price:.2f}, type={order_type}")
             return {"success": False, "message": "TRADING_ENABLED=False"}
 
         try:
@@ -1493,7 +1493,7 @@ class KISBroker:
 
                 # 드라이런(시뮬레이션) 경로: Config 또는 인자에 의해 실제 주문을 보내지 않을 때
                 if simulate_only or not Config.TRADING_ENABLED:
-                    self.logger.info(f"[DRY RUN] 의도 실행: {ttype} {symbol} qty={qty} price={price}")
+                    self.logger.info(f"[DRY RUN] 의도 실행: {ttype} {symbol} qty={qty} price=${price:.2f}")
                     fake_res = {"success": True, "order_id": None, "data": None}
                     results.append({"intent": intent, "result": fake_res})
 
