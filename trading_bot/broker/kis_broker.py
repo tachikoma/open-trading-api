@@ -670,6 +670,7 @@ class KISBroker:
         """기본 재시도 판정기
 
         - 예외가 주어지면 rate-limit 관련 메시지(EGW00201 등)가 있는지 검사
+        - 호가단위 오류는 재시도하지 않음 (비즈니스 로직 오류)
         - 결과가 None 또는 DataFrame이고 비어있으면 재시도 권장
         - 결과가 튜플인 경우 모든 요소가 비어있을 때만 재시도 권장
         """
@@ -690,11 +691,23 @@ class KISBroker:
         except Exception:
             _pd = None
 
-        # DataFrame 빈값 판정
+        # DataFrame 빈값 판정 (단, 호가단위 오류는 제외)
         if _pd is not None and isinstance(result, _pd.DataFrame):
-            return result.empty
+            if result.empty:
+                # error_payload를 확인해서 호가단위 오류가 있으면 재시도하지 않음
+                try:
+                    error_payload = result.attrs.get("error_payload")
+                    if error_payload is not None:
+                        error_msg = str(error_payload)
+                        if "호가단위" in error_msg or "호가 단위" in error_msg:
+                            self.logger.debug(f"호가단위 오류 감지: 재시도하지 않음")
+                            return False
+                except Exception:
+                    pass
+                return True
+            return False
 
-        # 튜플/리스트인 경우 모든 요소가 비어있을 때만 재시도
+        # 튜플/리스트인 경우 모든 요소가 비어있을 때만 재시도 (호가단위 오류 체크)
         if isinstance(result, (tuple, list)):
             has_any = False
             for r in result:
@@ -704,6 +717,16 @@ class KISBroker:
                     if not r.empty:
                         has_any = True
                         break
+                    # DataFrame이 비어있어도 호가단위 오류는 제외
+                    try:
+                        error_payload = r.attrs.get("error_payload")
+                        if error_payload is not None:
+                            error_msg = str(error_payload)
+                            if "호가단위" in error_msg or "호가 단위" in error_msg:
+                                self.logger.debug(f"호가단위 오류 감지: 재시도하지 않음")
+                                return False
+                    except Exception:
+                        pass
                 else:
                     # 비-DataFrame 결과가 존재하면 재시도 불필요
                     has_any = True
@@ -923,6 +946,43 @@ class KISBroker:
     
     # ==================== 주문 ====================
     
+    @staticmethod
+    def _adjust_price_to_tick_unit(price: int, env_mode: str = "demo") -> int:
+        """
+        주식 가격을 호가 단위(tick size)에 맞춥니다.
+        
+        모의투자(VPS): 100원 단위만 지원
+        실전투자(PROD): 한국 주식시장 호가 단위
+        - 1,000원 이상: 1원 단위
+        - 100~1,000원: 10원 단위
+        - 10~100원: 1원 단위
+        - 1~10원: 1원 단위
+        
+        Args:
+            price: 조정 전 가격
+            env_mode: 'real' (실전투자) 또는 'demo' (모의투자)
+        
+        Returns:
+            호가 단위에 맞춘 가격 (내림)
+        """
+        if price < 0:
+            return 0
+        
+        # 모의투자는 100원 단위만 지원
+        if env_mode == "demo":
+            return (price // 100) * 100
+        
+        # 실전투자: 정확한 호가 단위 적용
+        if price >= 1000:
+            # 1원 단위이므로 그대로
+            return price
+        elif price >= 100:
+            # 10원 단위: 10으로 나눈 몫 * 10
+            return (price // 10) * 10
+        else:
+            # 10원 미만: 1원 단위이므로 그대로
+            return price
+    
     def buy(self, symbol: str, qty: int, price: int = 0, order_type: str = "00") -> Optional[Dict]:
         """
         매수 주문
@@ -941,6 +1001,10 @@ class KISBroker:
             return self._format_order_response(False, None, qty=qty, price=price, side="buy", message="TRADING_ENABLED=False")
         
         try:
+            # 지정가 주문인 경우 호가 단위에 맞춤
+            if order_type == "00" and price > 0:
+                price = self._adjust_price_to_tick_unit(price, env_mode=self.env_mode)
+            
             result = self._call_with_retry(
                 dsf.order_cash,
                 env_dv=self.env_mode,
@@ -1030,6 +1094,10 @@ class KISBroker:
             return self._format_order_response(False, None, qty=qty, price=price, side="sell", message="TRADING_ENABLED=False")
         
         try:
+            # 지정가 주문인 경우 호가 단위에 맞춤
+            if order_type == "00" and price > 0:
+                price = self._adjust_price_to_tick_unit(price, env_mode=self.env_mode)
+            
             result = self._call_with_retry(
                 dsf.order_cash,
                 env_dv=self.env_mode,

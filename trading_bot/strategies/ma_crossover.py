@@ -332,9 +332,30 @@ class MovingAverageCrossover(BaseStrategy):
                 self.logger.warning(f"[{format_symbol(symbol)}] 매수 수량 0 (금액 및 수수료 고려 시 부족)")
                 return
             
-            # 매수 주문
-            self.logger.info(f"[{format_symbol(symbol)}] 매수 시도: 가격={current_price}, 수량={qty}")
-            result = self.broker.buy(symbol, qty, current_price, order_type="00")
+            # 호가 단위 조정 (broker에서도 자동 조정되지만, 로깅 명확성을 위해 미리 보여줌)
+            adjusted_price = self.broker._adjust_price_to_tick_unit(current_price, env_mode=self.broker.env_mode)
+            
+            # 호가 단위가 조정된 경우, 수수료 재계산
+            if adjusted_price != current_price:
+                self.logger.debug(f"[{format_symbol(symbol)}] 호가 단위 조정: {current_price} → {adjusted_price}")
+                est_adjusted = calculate_fees_and_taxes(adjusted_price, qty, side="buy")
+                gross_adjusted = est_adjusted['gross_amount'] + est_adjusted['total_fees']
+                if gross_adjusted > invest_amount:
+                    self.logger.warning(f"[{format_symbol(symbol)}] 호가 조정 후 수수료 초과 - 수량 재조정 필요")
+                    # 조정된 가격 기준으로 수량 재계산
+                    qty = invest_amount // adjusted_price
+                    while qty > 0:
+                        est = calculate_fees_and_taxes(adjusted_price, qty, side="buy")
+                        if est['gross_amount'] + est['total_fees'] <= invest_amount:
+                            break
+                        qty -= 1
+                    if qty == 0:
+                        self.logger.warning(f"[{format_symbol(symbol)}] 수량 재조정 후에도 0 (부족)")
+                        return
+            
+            # 매수 주문 (조정된 가격 사용)
+            self.logger.info(f"[{format_symbol(symbol)}] 매수 시도: 가격={adjusted_price}, 수량={qty}")
+            result = self.broker.buy(symbol, qty, adjusted_price, order_type="00")
             
             if result and result.get('success'):
                 fees_info = result.get('fees') or calculate_fees_and_taxes(current_price, qty, side="buy")
@@ -383,9 +404,15 @@ class MovingAverageCrossover(BaseStrategy):
             
             current_price = int(price_df.iloc[0]['stck_prpr'])
             
-            # 매도 주문
-            self.logger.info(f"[{format_symbol(symbol)}] 매도 시도: 가격={current_price}, 수량={qty}")
-            result = self.broker.sell(symbol, qty, current_price, order_type="00")
+            # 호가 단위 조정 (broker에서도 자동 조정되지만, 로깅 명확성을 위해 미리 보여줌)
+            adjusted_price = self.broker._adjust_price_to_tick_unit(current_price, env_mode=self.broker.env_mode)
+            
+            if adjusted_price != current_price:
+                self.logger.debug(f"[{format_symbol(symbol)}] 호가 단위 조정: {current_price} → {adjusted_price}")
+            
+            # 매도 주문 (조정된 가격 사용)
+            self.logger.info(f"[{format_symbol(symbol)}] 매도 시도: 가격={adjusted_price}, 수량={qty}")
+            result = self.broker.sell(symbol, qty, adjusted_price, order_type="00")
             
             if result and result.get('success'):
                 fees_info = result.get('fees') or calculate_fees_and_taxes(current_price, qty, side="sell")
