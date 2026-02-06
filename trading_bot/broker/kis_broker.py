@@ -790,6 +790,7 @@ class KISBroker:
         """기본 재시도 판정기
 
         - 예외가 주어지면 rate-limit 관련 메시지(EGW00201 등)가 있는지 검사
+        - 호가단위 오류는 재시도하지 않음 (비즈니스 로직 오류)
         - 결과가 None 또는 DataFrame이고 비어있으면 재시도 권장
         - 결과가 튜플인 경우 모든 요소가 비어있을 때만 재시도 권장
         """
@@ -810,11 +811,23 @@ class KISBroker:
         except Exception:
             _pd = None
 
-        # DataFrame 빈값 판정
+        # DataFrame 빈값 판정 (단, 호가단위 오류는 제외)
         if _pd is not None and isinstance(result, _pd.DataFrame):
-            return result.empty
+            if result.empty:
+                # error_payload를 확인해서 호가단위 오류가 있으면 재시도하지 않음
+                try:
+                    error_payload = result.attrs.get("error_payload")
+                    if error_payload is not None:
+                        error_msg = str(error_payload)
+                        if "호가단위" in error_msg or "호가 단위" in error_msg:
+                            self.logger.debug(f"호가단위 오류 감지: 재시도하지 않음")
+                            return False
+                except Exception:
+                    pass
+                return True
+            return False
 
-        # 튜플/리스트인 경우 모든 요소가 비어있을 때만 재시도
+        # 튜플/리스트인 경우 모든 요소가 비어있을 때만 재시도 (호가단위 오류 체크)
         if isinstance(result, (tuple, list)):
             has_any = False
             for r in result:
@@ -824,6 +837,16 @@ class KISBroker:
                     if not r.empty:
                         has_any = True
                         break
+                    # DataFrame이 비어있어도 호가단위 오류는 제외
+                    try:
+                        error_payload = r.attrs.get("error_payload")
+                        if error_payload is not None:
+                            error_msg = str(error_payload)
+                            if "호가단위" in error_msg or "호가 단위" in error_msg:
+                                self.logger.debug(f"호가단위 오류 감지: 재시도하지 않음")
+                                return False
+                    except Exception:
+                        pass
                 else:
                     # 비-DataFrame 결과가 존재하면 재시도 불필요
                     has_any = True
@@ -1117,6 +1140,103 @@ class KISBroker:
     
     # ==================== 주문 ====================
     
+    @staticmethod
+    def _get_tick_unit(price: int, env_mode: str = "demo") -> int:
+        """
+        주식 가격대별 호가 단위(tick size)를 반환합니다.
+        
+        한국거래소(KRX) 기준 호가 단위 규칙:
+        - 1,000원 미만: 1원
+        - 1,000 ~ 5,000원: 5원
+        - 5,000 ~ 10,000원: 10원
+        - 10,000 ~ 50,000원: 50원
+        - 50,000 ~ 100,000원: 100원
+        - 100,000 ~ 500,000원: 500원
+        - 500,000원 이상: 1,000원
+        
+        모의투자(VPS)와 실전투자(PROD) 모두 동일한 규칙을 적용합니다.
+        
+        Args:
+            price: 주문 가격
+            env_mode: 'real' (실전투자) 또는 'demo' (모의투자)
+        
+        Returns:
+            해당 가격대의 호가 단위
+        """
+        if price < 0:
+            return 1
+        
+        if price < 1_000:
+            return 1
+        elif price < 5_000:
+            return 5
+        elif price < 10_000:
+            return 10
+        elif price < 50_000:
+            return 50
+        elif price < 100_000:
+            return 100
+        elif price < 500_000:
+            return 500
+        else:
+            return 1_000
+    
+    @staticmethod
+    def _adjust_price_to_tick_unit(price: int, env_mode: str = "demo") -> int:
+        """
+        주식 가격을 호가 단위(tick size)에 맞춥니다.
+        
+        KRX 기준 가격대별 호가 단위:
+        - 1,000원 미만: 1원
+        - 1,000 ~ 5,000원: 5원
+        - 5,000 ~ 10,000원: 10원
+        - 10,000 ~ 50,000원: 50원
+        - 50,000 ~ 100,000원: 100원
+        - 100,000 ~ 500,000원: 500원
+        - 500,000원 이상: 1,000원
+        
+        Args:
+            price: 조정 전 가격
+            env_mode: 'real' (실전투자) 또는 'demo' (모의투자)
+        
+        Returns:
+            호가 단위에 맞춘 가격 (내림)
+        """
+        if price <= 0:
+            return 0
+        
+        tick_unit = KISBroker._get_tick_unit(price, env_mode)
+        return (price // tick_unit) * tick_unit
+    
+    @staticmethod
+    def _validate_price_tick_unit(price: int, env_mode: str = "demo") -> Tuple[bool, str]:
+        """
+        주문 가격이 호가 단위를 만족하는지 검증합니다.
+        
+        Args:
+            price: 검증할 가격
+            env_mode: 'real' (실전투자) 또는 'demo' (모의투자)
+        
+        Returns:
+            (유효성, 오류메시지) 튜플
+            - (True, "") : 유효한 가격
+            - (False, "오류메시지") : 호가 단위 위반
+        """
+        if price <= 0:
+            return True, ""  # 시장가(0)는 검증 대상 외
+        
+        tick_unit = KISBroker._get_tick_unit(price, env_mode)
+        remainder = price % tick_unit
+        
+        if remainder != 0:
+            adjusted_price = (price // tick_unit) * tick_unit
+            return False, (
+                f"호가 단위 오류: 가격 {price}원은 호가 단위 {tick_unit}원에 맞지 않습니다. "
+                f"조정된 가격: {adjusted_price}원 또는 {adjusted_price + tick_unit}원"
+            )
+        
+        return True, ""
+    
     def buy(self, symbol: str, qty: int, price: int = 0, order_type: str = "00") -> Optional[Dict]:
         """
         매수 주문
@@ -1135,6 +1255,23 @@ class KISBroker:
             return self._format_order_response(False, None, qty=qty, price=price, side="buy", message="TRADING_ENABLED=False")
         
         try:
+            # 지정가 주문인 경우 호가 단위 검증 및 조정
+            original_price = price
+            if order_type == "00" and price > 0:
+                # 호가 단위 검증
+                is_valid, error_msg = self._validate_price_tick_unit(price, env_mode=self.env_mode)
+                if not is_valid:
+                    self.logger.warning(f"[호가 단위] {symbol} 매수 주문: {error_msg}")
+                
+                # 호가 단위에 맞게 가격 조정
+                adjusted_price = self._adjust_price_to_tick_unit(price, env_mode=self.env_mode)
+                if adjusted_price != original_price:
+                    self.logger.info(
+                        f"가격 조정: {symbol} 매수 {original_price}원 → {adjusted_price}원 "
+                        f"(호가 단위: {self._get_tick_unit(original_price, self.env_mode)}원)"
+                    )
+                price = adjusted_price
+            
             result = self._call_with_retry(
                 dsf.order_cash,
                 env_dv=self.env_mode,
@@ -1223,6 +1360,23 @@ class KISBroker:
             return self._format_order_response(False, None, qty=qty, price=price, side="sell", message="TRADING_ENABLED=False")
         
         try:
+            # 지정가 주문인 경우 호가 단위 검증 및 조정
+            original_price = price
+            if order_type == "00" and price > 0:
+                # 호가 단위 검증
+                is_valid, error_msg = self._validate_price_tick_unit(price, env_mode=self.env_mode)
+                if not is_valid:
+                    self.logger.warning(f"[호가 단위] {symbol} 매도 주문: {error_msg}")
+                
+                # 호가 단위에 맞게 가격 조정
+                adjusted_price = self._adjust_price_to_tick_unit(price, env_mode=self.env_mode)
+                if adjusted_price != original_price:
+                    self.logger.info(
+                        f"가격 조정: {symbol} 매도 {original_price}원 → {adjusted_price}원 "
+                        f"(호가 단위: {self._get_tick_unit(original_price, self.env_mode)}원)"
+                    )
+                price = adjusted_price
+            
             result = self._call_with_retry(
                 dsf.order_cash,
                 env_dv=self.env_mode,
