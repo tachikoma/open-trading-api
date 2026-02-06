@@ -64,6 +64,37 @@ def is_after_hours(us_time: datetime = None) -> bool:
     return get_market_phase(us_time) == 'after_hours'
 
 
+def is_daytime_trading_hours(us_time: datetime = None) -> bool:
+    """
+    주간거래 시간 여부 (10:00-16:00 EST)
+    
+    한국투자증권의 주간거래(daytime trading) API는 미국 정규장 시간 중
+    10:00-16:00 EST에만 사용 가능합니다.
+    (09:30-10:00 사이는 정규장 개설이지만 주간거래API는 불가)
+    
+    Args:
+        us_time: 미국 동부 시간 (None이면 현재 시간 사용)
+    
+    Returns:
+        True: 주간거래 시간 (10:00-16:00 EST)
+        False: 주간거래 불가능 시간
+    """
+    if us_time is None:
+        us_time = get_us_market_time()
+    
+    # 주말 확인 (월=0, 일=6)
+    if us_time.weekday() >= 5:
+        return False
+    
+    hour = us_time.hour
+    
+    # 10:00-16:00 EST
+    if 10 <= hour < 16:
+        return True
+    
+    return False
+
+
 def is_market_open(us_time: datetime = None) -> bool:
     """시장 개장 여부 (Pre + Regular + After)"""
     phase = get_market_phase(us_time)

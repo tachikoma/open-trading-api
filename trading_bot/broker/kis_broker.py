@@ -1602,6 +1602,128 @@ class KISBroker:
                 pass
             return {"success": False, "message": str(e)}
 
+    # ==================== 주간거래 전용 (Daytime Trading) ====================
+    
+    def buy_overseas_daytime(
+        self, 
+        symbol: str, 
+        qty: int, 
+        price: float, 
+        ovrs_excg_cd: str = None
+    ) -> Optional[Dict]:
+        """해외주식 주간거래 매수 주문
+        
+        주간거래(daytime trading)는 미국 정규장 시간(10:00-16:00 EST)에만 사용 가능합니다.
+        지정가(LIMIT) 주문만 가능합니다.
+        
+        API: /uapi/overseas-stock/v1/trading/daytime-order
+        TR_ID: TTTS6036U (실전/모의 통일)
+        
+        Args:
+            symbol: 해외 종목 코드 (예: AAPL)
+            qty: 주문 수량
+            price: 지정가 가격
+            ovrs_excg_cd: 거래소 코드 (NASD, NYSE, AMEX만 지원)
+        
+        Returns:
+            {"success": bool, "data": result} 또는 {"success": False, "message": error}
+        
+        Note:
+            - 지정가 주문만 가능 (LOO, LOC, MOO, MOC 불가)
+            - 미국 시장만 지원 (NASD, NYSE, AMEX)
+        """
+        if not Config.TRADING_ENABLED:
+            self.logger.warning(f"[DRY RUN] 주간거래 매수: {symbol}, qty={qty}, price=${price:.2f}")
+            return {"success": False, "message": "TRADING_ENABLED=False"}
+        
+        try:
+            ovrs_excg = ovrs_excg_cd or "NASD"
+            self.logger.info(f"주간거래 매수 주문: {symbol}, qty={qty}, price=${price:.2f}")
+            
+            res = self._call_with_retry(
+                osf.daytime_order,
+                order_dv="buy",
+                cano=self.account,
+                acnt_prdt_cd=self.product_code,
+                ovrs_excg_cd=ovrs_excg,
+                pdno=symbol,
+                ord_qty=str(qty),
+                ovrs_ord_unpr=str(price),
+                ctac_tlno="",
+                mgco_aptm_odno="",
+                ord_svr_dvsn_cd="0",
+                ord_dvsn="00",  # 지정가만 가능
+                check_result=self._check_retry_on_empty_or_rate_limit,
+            )
+            return {"success": True, "data": res}
+        except Exception as e:
+            self.logger.error(f"주간거래 매수 실패 ({symbol}): {e}")
+            try:
+                notify_order("BUY_OVR_DAYTIME", symbol, qty, price, False, message=str(e))
+            except Exception:
+                pass
+            return {"success": False, "message": str(e)}
+
+    def sell_overseas_daytime(
+        self, 
+        symbol: str, 
+        qty: int, 
+        price: float, 
+        ovrs_excg_cd: str = None
+    ) -> Optional[Dict]:
+        """해외주식 주간거래 매도 주문
+        
+        주간거래(daytime trading)는 미국 정규장 시간(10:00-16:00 EST)에만 사용 가능합니다.
+        지정가(LIMIT) 주문만 가능합니다.
+        
+        API: /uapi/overseas-stock/v1/trading/daytime-order
+        TR_ID: TTTS6037U (실전/모의 통일)
+        
+        Args:
+            symbol: 해외 종목 코드 (예: AAPL)
+            qty: 주문 수량
+            price: 지정가 가격
+            ovrs_excg_cd: 거래소 코드 (NASD, NYSE, AMEX만 지원)
+        
+        Returns:
+            {"success": bool, "data": result} 또는 {"success": False, "message": error}
+        
+        Note:
+            - 지정가 주문만 가능
+            - 미국 시장만 지원
+        """
+        if not Config.TRADING_ENABLED:
+            self.logger.warning(f"[DRY RUN] 주간거래 매도: {symbol}, qty={qty}, price=${price:.2f}")
+            return {"success": False, "message": "TRADING_ENABLED=False"}
+        
+        try:
+            ovrs_excg = ovrs_excg_cd or "NASD"
+            self.logger.info(f"주간거래 매도 주문: {symbol}, qty={qty}, price=${price:.2f}")
+            
+            res = self._call_with_retry(
+                osf.daytime_order,
+                order_dv="sell",
+                cano=self.account,
+                acnt_prdt_cd=self.product_code,
+                ovrs_excg_cd=ovrs_excg,
+                pdno=symbol,
+                ord_qty=str(qty),
+                ovrs_ord_unpr=str(price),
+                ctac_tlno="",
+                mgco_aptm_odno="",
+                ord_svr_dvsn_cd="0",
+                ord_dvsn="00",  # 지정가만 가능
+                check_result=self._check_retry_on_empty_or_rate_limit,
+            )
+            return {"success": True, "data": res}
+        except Exception as e:
+            self.logger.error(f"주간거래 매도 실패 ({symbol}): {e}")
+            try:
+                notify_order("SELL_OVR_DAYTIME", symbol, qty, price, False, message=str(e))
+            except Exception:
+                pass
+            return {"success": False, "message": str(e)}
+
     def execute_intents(self, intents: List[Dict[str, Any]], strategy: Any = None, simulate_only: bool = False) -> List[Dict[str, Any]]:
         """전략이 생성한 주문 의도(intent) 목록을 실행하는 유틸 메서드.
 
