@@ -93,31 +93,44 @@ def setup_logger(name: str, log_dir: Path, level: str = "INFO"):
                 seen_files.add(fname)
 
     # Remove any non-file StreamHandler from root logger (basicConfig adds one to stderr)
+    console_exists = False
     for h in list(root_logger.handlers):
         if isinstance(h, logging.StreamHandler) and not isinstance(h, logging.FileHandler):
-            root_logger.removeHandler(h)
+            if getattr(h, "stream", None) is sys.stdout:
+                console_exists = True
+            else:
+                root_logger.removeHandler(h)
 
-    # --- 모듈별 로거 설정: 콘솔 출력만 추가하고 전파 활성화 (파일은 루트에서) ---
+    # 루트 로거에 콘솔 핸들러 추가 (외부 라이브러리 로그가 콘솔에 나타나게 함)
+    if not console_exists:
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setFormatter(formatter)
+        root_logger.addHandler(console_handler)
+
+    # --- 외부 라이브러리 로거 설정 (DEBUG 로그 활성화) ---
+    # urllib3의 DEBUG 로그를 보려면 urllib3 로거를 명시적으로 설정해야 합니다.
+    # 루트 로거의 레벨만으로는 urllib3의 DEBUG 로그가 전파되지 않습니다.
+    if level == "DEBUG":
+        # urllib3: HTTP 연결, 요청/응답 상세 로그
+        logging.getLogger("urllib3").setLevel(logging.DEBUG)
+        # requests: HTTP 요청 상세 로그
+        logging.getLogger("requests").setLevel(logging.DEBUG)
+        # httplib: HTTP 프로토콜 레벨 로그
+        logging.getLogger("http.client").setLevel(logging.DEBUG)
+
+    # --- 모듈별 로거 설정: 핸들러 제거하고 전파 활성화 (루트 로거의 핸들러 사용) ---
     # Remove any FileHandler attached directly to the module logger to avoid duplicate files
     for h in list(logger.handlers):
         if isinstance(h, logging.FileHandler):
             logger.removeHandler(h)
 
-    # Ensure only one console handler (stream=sys.stdout)
-    seen_console = False
+    # 모듈 로거의 모든 콘솔 핸들러 제거 (루트 로거의 핸들러로 처리하기 위함)
+    # 이렇게 하면 propagate=True일 때 메시지가 두 번 출력되지 않음
     for h in list(logger.handlers):
-        if isinstance(h, logging.StreamHandler) and getattr(h, "stream", None) is sys.stdout:
-            if seen_console:
-                logger.removeHandler(h)   # 중복된 핸들러 제거
-            else:
-                seen_console = True
+        if isinstance(h, logging.StreamHandler) and not isinstance(h, logging.FileHandler):
+            logger.removeHandler(h)
 
-    if not seen_console:
-        console_handler = logging.StreamHandler(sys.stdout)
-        console_handler.setFormatter(formatter)
-        logger.addHandler(console_handler)
-
-    # Propagate to root (root has file handler but no console handler, so no duplication)
+    # Propagate to root logger (root has all handlers: file + console)
     logger.propagate = True
 
     return logger
