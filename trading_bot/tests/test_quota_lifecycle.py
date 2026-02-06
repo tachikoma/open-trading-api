@@ -150,7 +150,13 @@ def test_initial_moc_flow_and_state_update():
 def test_decide_buy_sets_quota_on_last_split():
     broker = _make_broker_without_auth()
     # Use splits=1 to make per-split amount equal total_amount so qty_int is significant
-    config = {"total_amount": 100, "one_shot_amount": 100, "splits": 1, "market": "overseas"}
+    config = {
+        "one_shot_amount": 100,
+        "market": "overseas",
+        "symbols": {
+            "TST": {"total_amount": 100, "splits": 1},
+        },
+    }
     strategy = InfiniteBuyV2_2(config=config, broker=broker)
 
     # make cum_buy_amt such that next buy will exhaust the total_amount
