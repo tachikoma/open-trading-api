@@ -41,6 +41,7 @@ from trading_bot.utils.telegram import notify_order, send_telegram_message
 from trading_bot.utils.symbols import format_symbol
 from trading_bot.broker.auth_utils import is_token_expired_response, refresh_token, TokenRefreshError
 from trading_bot.utils.fees import calculate_fees_and_taxes
+from trading_bot.utils.market_time import is_daytime_trading_hours
 
 
 class KISBroker:
@@ -1540,6 +1541,14 @@ class KISBroker:
             return {"success": False, "message": "TRADING_ENABLED=False"}
 
         try:
+            order_type_norm = (order_type or "LIMIT").upper()
+            if is_daytime_trading_hours():
+                if order_type_norm != "LIMIT":
+                    msg = "주간거래 시간에는 지정가(LIMIT) 주문만 가능합니다."
+                    self.logger.warning(f"해외 매수 주문 거절 ({symbol}): {msg} type={order_type_norm}")
+                    return {"success": False, "message": msg}
+                return self.buy_overseas_daytime(symbol, qty, price, ovrs_excg_cd=ovrs_excg_cd)
+
             ord_svr, ord_dvsn = self._map_overseas_ord_dvsn(order_type, side="buy")
             ovrs_excg = ovrs_excg_cd or self.config_overseas_default() if hasattr(self, 'config_overseas_default') else ("NASD")
             res = self._call_with_retry(
@@ -1575,6 +1584,14 @@ class KISBroker:
             return {"success": False, "message": "TRADING_ENABLED=False"}
 
         try:
+            order_type_norm = (order_type or "LIMIT").upper()
+            if is_daytime_trading_hours():
+                if order_type_norm != "LIMIT":
+                    msg = "주간거래 시간에는 지정가(LIMIT) 주문만 가능합니다."
+                    self.logger.warning(f"해외 매도 주문 거절 ({symbol}): {msg} type={order_type_norm}")
+                    return {"success": False, "message": msg}
+                return self.sell_overseas_daytime(symbol, qty, price, ovrs_excg_cd=ovrs_excg_cd)
+
             ord_svr, ord_dvsn = self._map_overseas_ord_dvsn(order_type, side="sell")
             ovrs_excg = ovrs_excg_cd or self.config_overseas_default() if hasattr(self, 'config_overseas_default') else ("NASD")
             res = self._call_with_retry(
@@ -1613,8 +1630,11 @@ class KISBroker:
     ) -> Optional[Dict]:
         """해외주식 주간거래 매수 주문
         
-        주간거래(daytime trading)는 미국 정규장 시간(10:00-16:00 EST)에만 사용 가능합니다.
+        주간거래(daytime trading)는 **한국시간** 오전 10시~오후 6시(10:00-18:00 KST)에만 사용 가능합니다.
         지정가(LIMIT) 주문만 가능합니다.
+        
+        이 API는 별도의 거래소를 통해 한국 업무시간 중에 미국 시장에 접근하도록 제공합니다.
+        미국 시간으로는 애프터마켓 종료 이후부터 프리마켓 시작 직전까지에 해당합니다.
         
         API: /uapi/overseas-stock/v1/trading/daytime-order
         TR_ID: TTTS6036U (실전/모의 통일)
@@ -1629,8 +1649,11 @@ class KISBroker:
             {"success": bool, "data": result} 또는 {"success": False, "message": error}
         
         Note:
+            - 한국시간 10:00-18:00, 평일만 사용 가능
             - 지정가 주문만 가능 (LOO, LOC, MOO, MOC 불가)
             - 미국 시장만 지원 (NASD, NYSE, AMEX)
+            - 미국 시간으로는 애프터마켓 종료 이후부터 프리마켓 시작 직전 거래
+            - 별도 거래소를 통한 거래
         """
         if not Config.TRADING_ENABLED:
             self.logger.warning(f"[DRY RUN] 주간거래 매수: {symbol}, qty={qty}, price=${price:.2f}")
@@ -1673,8 +1696,11 @@ class KISBroker:
     ) -> Optional[Dict]:
         """해외주식 주간거래 매도 주문
         
-        주간거래(daytime trading)는 미국 정규장 시간(10:00-16:00 EST)에만 사용 가능합니다.
+        주간거래(daytime trading)는 **한국시간** 오전 10시~오후 6시(10:00-18:00 KST)에만 사용 가능합니다.
         지정가(LIMIT) 주문만 가능합니다.
+        
+        이 API는 별도의 거래소를 통해 한국 업무시간 중에 미국 시장에 접근하도록 제공합니다.
+        미국 시간으로는 애프터마켓 종료 이후부터 프리마켓 시작 직전까지에 해당합니다.
         
         API: /uapi/overseas-stock/v1/trading/daytime-order
         TR_ID: TTTS6037U (실전/모의 통일)
@@ -1689,8 +1715,11 @@ class KISBroker:
             {"success": bool, "data": result} 또는 {"success": False, "message": error}
         
         Note:
-            - 지정가 주문만 가능
-            - 미국 시장만 지원
+            - 한국시간 10:00-18:00, 평일만 사용 가능
+            - 지정가 주문만 가능 (LOO, LOC, MOO, MOC 불가)
+            - 미국 시장만 지원 (NASD, NYSE, AMEX)
+            - 미국 시간으로는 애프터마켓 종료 이후부터 프리마켓 시작 직전 거래
+            - 별도 거래소를 통한 거래
         """
         if not Config.TRADING_ENABLED:
             self.logger.warning(f"[DRY RUN] 주간거래 매도: {symbol}, qty={qty}, price=${price:.2f}")

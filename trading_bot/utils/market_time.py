@@ -64,32 +64,48 @@ def is_after_hours(us_time: datetime = None) -> bool:
     return get_market_phase(us_time) == 'after_hours'
 
 
-def is_daytime_trading_hours(us_time: datetime = None) -> bool:
+def is_daytime_trading_hours(kr_time: datetime = None) -> bool:
     """
-    주간거래 시간 여부 (10:00-16:00 EST)
+    주간거래 시간 여부 (한국시간 10:00-18:00)
     
-    한국투자증권의 주간거래(daytime trading) API는 미국 정규장 시간 중
-    10:00-16:00 EST에만 사용 가능합니다.
-    (09:30-10:00 사이는 정규장 개설이지만 주간거래API는 불가)
+    한국투자증권의 주간거래(daytime trading) API는 **한국시간** 오전 10시 ~ 오후 6시에만
+    사용 가능합니다. 이 시간은 미국 시간으로는 애프터마켓 종료 이후부터
+    프리마켓 시작 직전까지에 해당합니다.
+    
+    이 API는 별도의 거래소를 통해 한국 거래자들이 미국 시장에 접근할 수 있도록
+    한국 업무시간 중에 제공합니다.
     
     Args:
-        us_time: 미국 동부 시간 (None이면 현재 시간 사용)
+        kr_time: 한국 시간 (None이면 현재 시간 사용)
+                 pytz.timezone('Asia/Seoul')을 사용한 datetime 객체 또는
+                 한국 시간대 아무 datetime(자동으로 한국시간으로 해석)
     
     Returns:
-        True: 주간거래 시간 (10:00-16:00 EST)
+        True: 주간거래 시간 (한국시간 10:00-18:00, 평일만)
         False: 주간거래 불가능 시간
+    
+    Note:
+        - 미국 시간으로는 애프터마켓 종료 이후부터 프리마켓 시작 직전까지
+        - 한국시간 10:00 KST = 미국 EST 전날 20:00 / EDT 전날 21:00
+        - 한국시간 18:00 KST = 미국 EST 다음날 04:00 / EDT 다음날 05:00
     """
-    if us_time is None:
-        us_time = get_us_market_time()
+    if kr_time is None:
+        kr_time = datetime.now(pytz.timezone('Asia/Seoul'))
+    elif kr_time.tzinfo is None:
+        # timezone 정보가 없으면 한국시간으로 해석
+        kr_time = pytz.timezone('Asia/Seoul').localize(kr_time)
+    else:
+        # timezone이 있으면 한국시간으로 변환
+        kr_time = kr_time.astimezone(pytz.timezone('Asia/Seoul'))
     
     # 주말 확인 (월=0, 일=6)
-    if us_time.weekday() >= 5:
+    if kr_time.weekday() >= 5:
         return False
     
-    hour = us_time.hour
+    hour = kr_time.hour
     
-    # 10:00-16:00 EST
-    if 10 <= hour < 16:
+    # 한국시간 10:00-18:00
+    if 10 <= hour < 18:
         return True
     
     return False
