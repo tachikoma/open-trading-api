@@ -671,6 +671,7 @@ class KISBroker:
 
         - 예외가 주어지면 rate-limit 관련 메시지(EGW00201 등)가 있는지 검사
         - 호가단위 오류는 재시도하지 않음 (비즈니스 로직 오류)
+        - 장운영시간 오류는 재시도하지 않음 (시간 외 주문 불가)
         - 결과가 None 또는 DataFrame이고 비어있으면 재시도 권장
         - 결과가 튜플인 경우 모든 요소가 비어있을 때만 재시도 권장
         """
@@ -679,6 +680,10 @@ class KISBroker:
             msg = str(exception)
             if "EGW00201" in msg or "초당 거래건수" in msg or "초당 거래건수를 초과" in msg:
                 return True
+            # 장운영시간 오류는 재시도하지 않음
+            if "장운영시간이 아닙니다" in msg or "장운영시간" in msg:
+                self.logger.debug(f"장운영시간 오류 감지: 재시도하지 않음")
+                return False
             return False
 
         # 결과 기반 판정
@@ -691,23 +696,28 @@ class KISBroker:
         except Exception:
             _pd = None
 
-        # DataFrame 빈값 판정 (단, 호가단위 오류는 제외)
+        # DataFrame 빈값 판정 (단, 호가단위/장운영시간 오류는 제외)
         if _pd is not None and isinstance(result, _pd.DataFrame):
             if result.empty:
-                # error_payload를 확인해서 호가단위 오류가 있으면 재시도하지 않음
+                # error_payload를 확인해서 재시도하면 안 되는 오류가 있는지 체크
                 try:
                     error_payload = result.attrs.get("error_payload")
                     if error_payload is not None:
                         error_msg = str(error_payload)
+                        # 호가단위 오류
                         if "호가단위" in error_msg or "호가 단위" in error_msg:
                             self.logger.debug(f"호가단위 오류 감지: 재시도하지 않음")
+                            return False
+                        # 장운영시간 오류
+                        if "장운영시간이 아닙니다" in error_msg or "장운영시간" in error_msg:
+                            self.logger.debug(f"장운영시간 오류 감지: 재시도하지 않음")
                             return False
                 except Exception:
                     pass
                 return True
             return False
 
-        # 튜플/리스트인 경우 모든 요소가 비어있을 때만 재시도 (호가단위 오류 체크)
+        # 튜플/리스트인 경우 모든 요소가 비어있을 때만 재시도 (호가단위/장운영시간 오류 체크)
         if isinstance(result, (tuple, list)):
             has_any = False
             for r in result:
@@ -717,13 +727,18 @@ class KISBroker:
                     if not r.empty:
                         has_any = True
                         break
-                    # DataFrame이 비어있어도 호가단위 오류는 제외
+                    # DataFrame이 비어있어도 재시도하면 안 되는 오류는 제외
                     try:
                         error_payload = r.attrs.get("error_payload")
                         if error_payload is not None:
                             error_msg = str(error_payload)
+                            # 호가단위 오류
                             if "호가단위" in error_msg or "호가 단위" in error_msg:
                                 self.logger.debug(f"호가단위 오류 감지: 재시도하지 않음")
+                                return False
+                            # 장운영시간 오류
+                            if "장운영시간이 아닙니다" in error_msg or "장운영시간" in error_msg:
+                                self.logger.debug(f"장운영시간 오류 감지: 재시도하지 않음")
                                 return False
                     except Exception:
                         pass
