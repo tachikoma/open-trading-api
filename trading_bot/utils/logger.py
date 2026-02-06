@@ -92,7 +92,12 @@ def setup_logger(name: str, log_dir: Path, level: str = "INFO"):
             else:
                 seen_files.add(fname)
 
-    # --- 모듈별 로거 설정: 콘솔 출력만 추가하고 파일은 루트 핸들러로 전파 ---
+    # Remove any non-file StreamHandler from root logger (basicConfig adds one to stderr)
+    for h in list(root_logger.handlers):
+        if isinstance(h, logging.StreamHandler) and not isinstance(h, logging.FileHandler):
+            root_logger.removeHandler(h)
+
+    # --- 모듈별 로거 설정: 콘솔 출력만 추가하고 전파 활성화 (파일은 루트에서) ---
     # Remove any FileHandler attached directly to the module logger to avoid duplicate files
     for h in list(logger.handlers):
         if isinstance(h, logging.FileHandler):
@@ -112,7 +117,7 @@ def setup_logger(name: str, log_dir: Path, level: str = "INFO"):
         console_handler.setFormatter(formatter)
         logger.addHandler(console_handler)
 
-    # Let messages bubble up to root (where rotating file handler lives)
+    # Propagate to root (root has file handler but no console handler, so no duplication)
     logger.propagate = True
 
     return logger
