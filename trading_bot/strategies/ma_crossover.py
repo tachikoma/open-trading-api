@@ -274,6 +274,15 @@ class MovingAverageCrossover(BaseStrategy):
         # 감시 종목 순회
         for symbol in Config.WATCH_LIST:
             try:
+                # 먼저 테이크프라핏(구매가 대비 +10% 이상) 체크
+                try:
+                    sold = self._check_take_profit_and_sell(symbol)
+                    if sold:
+                        # 이미 매도 실행했으면 다음 종목으로
+                        continue
+                except Exception as e:
+                    self.logger.warning(f"[{format_symbol(symbol)}] 테이크프라핏 검사 중 오류: {e}")
+
                 signal = self.get_signal(symbol)
                 
                 if signal is None:
@@ -367,6 +376,85 @@ class MovingAverageCrossover(BaseStrategy):
 
         except Exception as e:
             self.logger.error(f"[{format_symbol(symbol)}] 매수 실행 중 오류: {e}")
+
+    def _check_take_profit_and_sell(self, symbol: str) -> bool:
+        """
+        보유 중인 경우, 평균 매수가 대비 현재가가 10% 이상 상승했으면 전량 매도 실행.
+
+        Returns:
+            True if a take-profit sell was executed, False otherwise.
+        """
+        try:
+            holdings_df, _ = self.broker.get_balance()
+            if holdings_df is None or holdings_df.empty:
+                return False
+
+            holding = holdings_df[holdings_df['pdno'] == symbol]
+            if holding.empty:
+                return False
+
+            qty = int(holding.iloc[0].get('hldg_qty') or holding.iloc[0].get('hldg_qty_amt') or 0)
+            if qty == 0:
+                return False
+
+            # 평균 매수가(컬럼명은 환경에 따라 다르므로 후보들을 순회)
+            avg_cols = ['avrg_prc', 'avrg_prpr', 'avg_buy_price', 'avg_buy_prc', 'avg_prc', 'avg_price', 'avrg_pric', 'prch_prc', 'prchs_avg']
+            avg_price = None
+            for c in avg_cols:
+                if c in holding.columns:
+                    try:
+                        v = holding.iloc[0].get(c)
+                        if v is not None and str(v).strip() != "":
+                            avg_price = int(float(v))
+                            break
+                    except Exception:
+                        continue
+
+            if avg_price is None:
+                # 시도: 'buy_price' / 'prpr' 등도 확인
+                for c in ['buy_price', 'prpr', 'stck_prpr', 'price']:
+                    if c in holding.columns:
+                        try:
+                            v = holding.iloc[0].get(c)
+                            if v is not None and str(v).strip() != "":
+                                avg_price = int(float(v))
+                                break
+                        except Exception:
+                            continue
+
+            if avg_price is None:
+                self.logger.debug(f"[{format_symbol(symbol)}] 평균 매수가를 찾을 수 없어 테이크프라핏 검사 건너뜀")
+                return False
+
+            # 현재가 조회
+            price_df = self.broker.get_current_price(symbol)
+            if price_df is None or price_df.empty:
+                self.logger.warning(f"[{format_symbol(symbol)}] 현재가 조회 실패 (테이크프라핏)")
+                return False
+
+            try:
+                current_price = int(price_df.iloc[0].get('stck_prpr') or price_df.iloc[0].get('prpr') or price_df.iloc[0].get('close') or 0)
+            except Exception:
+                current_price = 0
+
+            if current_price == 0:
+                return False
+
+            # 이익률 계산
+            try:
+                profit_pct = (current_price - avg_price) / avg_price
+            except Exception:
+                return False
+
+            if profit_pct >= (Config.TAKE_PROFIT_PERCENT / 100.0):
+                self.logger.info(f"[{format_symbol(symbol)}] 테이크프라핏 조건 충족: 현재가={current_price}, 평균매수가={avg_price}, 이익률={profit_pct:.2%} - 전량 매도 실행 (목표={Config.TAKE_PROFIT_PERCENT:.1f}%)")
+                self._execute_sell(symbol)
+                return True
+
+            return False
+        except Exception as e:
+            self.logger.error(f"[{format_symbol(symbol)}] 테이크프라핏 검사 중 오류: {e}")
+            return False
     
     def _execute_sell(self, symbol: str):
         """
