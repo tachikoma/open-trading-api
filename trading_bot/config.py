@@ -203,8 +203,16 @@ class Config:
     MA_LONG_PERIOD = 20   # 장기 이동평균 (20일)
 
     # 리스크 관리
-    STOP_LOSS_PERCENT = 3.0    # 손절 비율 (3%)
-    TAKE_PROFIT_PERCENT = 5.0   # 익절 비율 (5%)
+    try:
+        STOP_LOSS_PERCENT = float(os.environ.get("STOP_LOSS_PERCENT", str(3.0)))    # 손절 비율 (기본 3%)
+    except Exception:
+        STOP_LOSS_PERCENT = 3.0
+
+    try:
+        # TAKE_PROFIT_PERCENT은 백분율 값(예: 15.0 = 15%)으로 .env나 환경변수로 설정 가능
+        TAKE_PROFIT_PERCENT = float(os.environ.get("TAKE_PROFIT_PERCENT", str(15.0)))   # 익절 비율 (기본 15%)
+    except Exception:
+        TAKE_PROFIT_PERCENT = 15.0
 
     # 백테스트 설정
     BACKTEST_INITIAL_CAPITAL = 10000000  # 백테스트 초기 자본금 (1천만원)
