@@ -128,6 +128,24 @@ class BacktestEngine:
             self.positions[symbol]['qty'] = new_qty
             self.positions[symbol]['avg_price'] = new_avg
 
+            # 거래 기록 (매수도 동일 스키마로 저장)
+            trade_record = {
+                'date': date,
+                'symbol': symbol,
+                'action': 'buy',
+                'quantity': quantity,
+                'price': actual_price,
+                'avg_buy_price': 0,
+                'gross': gross,
+                'commission': commission,
+                'tax': tax,
+                'total_fees': total_fees,
+                'net_amount': -total_cost,
+                'profit': 0,
+                'profit_pct': 0,
+            }
+            self.trades.append(trade_record)
+
             self.logger.info(f"[{date}] 매수: {symbol} {quantity}주 @ {actual_price:,.0f}원 (수수료: {commission:,.0f}원, 세금: {tax:,.0f}원)")
 
         elif action == 'sell':
@@ -394,9 +412,10 @@ class BacktestEngine:
         
         # 성과 계산
         equity_series = pd.Series([e['equity'] for e in self.equity_curve])
+        closed_trades = [t for t in self.trades if t.get('action') == 'sell']
         metrics = PerformanceMetrics.calculate_all_metrics(
             equity_series, 
-            self.trades,
+            closed_trades,
             all_dates[0].strftime('%Y-%m-%d'),
             all_dates[-1].strftime('%Y-%m-%d')
         )
