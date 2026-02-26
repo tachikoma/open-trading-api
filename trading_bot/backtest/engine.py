@@ -366,24 +366,6 @@ class BacktestEngine:
                     signal_stats['data_insufficient'] += 1
                     continue  # 데이터 부족
                 
-                # 먼저 백테스트용 테이크프라핏 검사: 보유 중인 경우 평균매수가 대비 +10% 이상이면 전량 매도
-                if symbol in self.positions:
-                    pos = self.positions[symbol]
-                    pos_qty = pos.get('qty', 0)
-                    pos_avg = pos.get('avg_price', 0)
-                    if pos_qty > 0 and pos_avg > 0:
-                        cur_price = current_prices.get(symbol, 0)
-                        try:
-                            profit_pct = (cur_price - pos_avg) / pos_avg
-                        except Exception:
-                            profit_pct = 0
-                        if profit_pct >= (Config.TAKE_PROFIT_PERCENT / 100.0):
-                            # 전량 매도 실행
-                            self.logger.info(f"[{date.strftime('%Y%m%d')}] 백테스트 테이크프라핏 발동: {symbol} 현재가={cur_price:.0f}, 평균매수가={pos_avg:.0f}, 이익률={profit_pct:.2%} - 전량 매도 (목표={Config.TAKE_PROFIT_PERCENT:.1f}%)")
-                            self.execute_trade(symbol, 'sell', cur_price, pos_qty, date.strftime('%Y%m%d'))
-                            # 매도 후에는 시그널 검사 생략
-                            continue
-
                 # 전략 시그널 생성 (첫 10일과 마지막 10일은 디버그 모드)
                 debug_mode = idx < 10 or idx >= len(backtest_dates) - 10
                 signal = strategy.analyze_data(symbol, symbol_data_until_now, debug=debug_mode)
@@ -414,6 +396,17 @@ class BacktestEngine:
                     # 보유 중이면 전량 매도
                     if symbol in self.positions:
                         quantity = self.positions[symbol]['qty']
+                        if Config.LOSS_SELL_BLOCK_ENABLED and quantity > 0:
+                            avg_price = self.positions[symbol].get('avg_price', 0)
+                            if avg_price > 0:
+                                pnl_pct = ((price - avg_price) / avg_price) * 100
+                                if pnl_pct < -Config.LOSS_SELL_BLOCK_THRESHOLD_PERCENT:
+                                    self.logger.info(
+                                        f"[{date_str}] 손실 매도 제한으로 매도 스킵: {symbol} 현재가={price:.0f}, "
+                                        f"평균매수가={avg_price:.0f}, 손익률={pnl_pct:.2f}% "
+                                        f"(기준=-{Config.LOSS_SELL_BLOCK_THRESHOLD_PERCENT:.2f}%)"
+                                    )
+                                    continue
                         self.execute_trade(symbol, 'sell', price, quantity, date_str)
             
             # 일별 자산 가치 기록

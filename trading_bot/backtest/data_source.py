@@ -5,6 +5,7 @@ SQLite DB, KIS API, 또는 FinanceDataReader에서 과거 데이터를 로드합
 """
 import sqlite3
 import pandas as pd
+import warnings
 from pathlib import Path
 from typing import Optional, Dict
 from datetime import datetime
@@ -47,7 +48,13 @@ class BacktestDataSource:
                 print(f"📥 {symbol} 데이터 다운로드 중 (FinanceDataReader)...")
                 
                 # FinanceDataReader로 데이터 가져오기
-                df = fdr.DataReader(symbol, start_dt, end_dt)
+                with warnings.catch_warnings():
+                    warnings.filterwarnings(
+                        "ignore",
+                        message=".*ChainedAssignmentError.*",
+                        category=FutureWarning,
+                    )
+                    df = fdr.DataReader(symbol, start_dt, end_dt)
                 
                 if df is None or df.empty:
                     print(f"⚠️  {symbol}: 데이터 없음")
@@ -62,12 +69,13 @@ class BacktestDataSource:
                     'Low': 'stck_lwpr',
                     'Close': 'stck_clpr',
                     'Volume': 'acml_vol'
-                })
+                }).copy()
                 
                 # 날짜 형식 처리
                 if 'date' in df.columns:
-                    df['stck_bsop_date'] = pd.to_datetime(df['date']).dt.strftime('%Y%m%d')
-                    df['date'] = pd.to_datetime(df['date'])
+                    converted_date = pd.to_datetime(df['date'])
+                    df.loc[:, 'stck_bsop_date'] = converted_date.dt.strftime('%Y%m%d')
+                    df.loc[:, 'date'] = converted_date
                 
                 historical_data[symbol] = df
                 print(f"✅ {symbol}: {len(df)}건 로드됨 (FDR)")
@@ -157,8 +165,10 @@ class BacktestDataSource:
                     df = pd.read_sql_query(query, conn, params=(symbol, start_dt, end_dt))
                     
                     if not df.empty:
-                        df['stck_bsop_date'] = pd.to_datetime(df['date']).dt.strftime('%Y%m%d')
-                        df['date'] = pd.to_datetime(df['date'])
+                        df = df.copy()
+                        converted_date = pd.to_datetime(df['date'])
+                        df.loc[:, 'stck_bsop_date'] = converted_date.dt.strftime('%Y%m%d')
+                        df.loc[:, 'date'] = converted_date
                         historical_data[symbol] = df
                         print(f"✅ {symbol}: {len(df)}건 로드됨 (DB-통합)")
                     else:
