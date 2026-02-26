@@ -58,6 +58,11 @@ class Config:
     LOG_DIR = Path(__file__).parent / "logs"
     # LOG_LEVEL: 환경변수 > .env > 기본값
     LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()  # DEBUG, INFO, WARNING, ERROR
+    _raw_mpl_level = os.environ.get("MATPLOTLIB_LOG_LEVEL", "WARNING").upper()
+    if _raw_mpl_level in {"CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG", "NOTSET"}:
+        MATPLOTLIB_LOG_LEVEL = _raw_mpl_level
+    else:
+        MATPLOTLIB_LOG_LEVEL = "WARNING"
     # 로그 파일명 (통합 로그)
     LOG_FILE = Path(os.environ.get("LOG_FILE", str(LOG_DIR / "app.log")))
     # 로테이션 설정 (.env 또는 환경변수로 오버라이드 가능)
@@ -208,25 +213,30 @@ class Config:
     except Exception:
         STOP_LOSS_PERCENT = 3.0
 
+    _raw_loss_sell_block_enabled = os.environ.get("LOSS_SELL_BLOCK_ENABLED", "0")
+    if isinstance(_raw_loss_sell_block_enabled, bool):
+        LOSS_SELL_BLOCK_ENABLED = _raw_loss_sell_block_enabled
+    else:
+        LOSS_SELL_BLOCK_ENABLED = str(_raw_loss_sell_block_enabled).strip().lower() in ("1", "true", "yes", "on")
+
     try:
-        # TAKE_PROFIT_PERCENT은 백분율 값(예: 15.0 = 15%)으로 .env나 환경변수로 설정 가능
-        TAKE_PROFIT_PERCENT = float(os.environ.get("TAKE_PROFIT_PERCENT", str(15.0)))   # 익절 비율 (기본 15%)
+        LOSS_SELL_BLOCK_THRESHOLD_PERCENT = float(os.environ.get("LOSS_SELL_BLOCK_THRESHOLD_PERCENT", str(5.0)))
     except Exception:
-        TAKE_PROFIT_PERCENT = 15.0
+        LOSS_SELL_BLOCK_THRESHOLD_PERCENT = 5.0
 
     # 백테스트 설정
     BACKTEST_INITIAL_CAPITAL = 10000000  # 백테스트 초기 자본금 (1천만원)
-    BACKTEST_COMMISSION_RATE = 0.00015   # 수수료율 0.015% (편도)
+    BACKTEST_COMMISSION_RATE = 0.0015   # 수수료율 0.15% (편도)
     BACKTEST_SLIPPAGE_RATE = 0.001       # 슬리피지 0.1%
     BACKTEST_RESULTS_DIR = Path(__file__).parent / "backtest_results"
 
     # 실제/시뮬레이션 모두에서 사용할 기본 수수료/세금 설정
-    # 국내 주식 기준: 수수료(편도) 0.015% = 0.00015, 거래세(매도시) 0.20% = 0.002
+    # 국내 주식 기준: 수수료(편도) 0.15% = 0.0015, 거래세(매도시) 0.20% = 0.002
     # 환경변수 또는 .env로 오버라이드 가능 (예: COMMISSION_RATE, TRADE_TAX_RATE)
     try:
-        COMMISSION_RATE = float(os.environ.get("COMMISSION_RATE", str(0.00015)))
+        COMMISSION_RATE = float(os.environ.get("COMMISSION_RATE", str(0.0015)))
     except Exception:
-        COMMISSION_RATE = 0.00015
+        COMMISSION_RATE = 0.0015
 
     try:
         COMMISSION_MIN = int(os.environ.get("COMMISSION_MIN", "0"))

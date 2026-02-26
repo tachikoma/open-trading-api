@@ -196,7 +196,8 @@ MA_LONG_PERIOD = 20   # 장기 이동평균 (일)
 # 리스크 관리
 MAX_POSITION_SIZE = 1000000  # 최대 투자 금액 (원)
 STOP_LOSS_PERCENT = 3.0      # 손절 비율 (%)
-TAKE_PROFIT_PERCENT = 5.0    # 익절 비율 (%)
+LOSS_SELL_BLOCK_ENABLED = True              # 손실 매도 제한 사용 여부
+LOSS_SELL_BLOCK_THRESHOLD_PERCENT = 5.0     # 손실 매도 제한 임계값 (%)
 ```
 
 ### 환경 변수 및 .env 파일
@@ -205,6 +206,8 @@ TAKE_PROFIT_PERCENT = 5.0    # 익절 비율 (%)
 - 주요 키:
   - `ENV_MODE`: `real` 또는 `demo`
   - `TRADING_ENABLED`: 실제 주문 활성화 여부 (`true`/`false`, `1`/`0`, `yes`/`no` 허용)
+  - `LOSS_SELL_BLOCK_ENABLED`: 손실 매도 제한 활성화 여부 (`true`/`false`, `1`/`0`, `yes`/`no` 허용)
+  - `LOSS_SELL_BLOCK_THRESHOLD_PERCENT`: 손실 매도 제한 임계값(%)
 
 - 파일 위치(프로젝트 루트):
   - `./.env`  (실사용 파일 — 민감정보 포함 시 커밋 금지)
@@ -215,6 +218,8 @@ TAKE_PROFIT_PERCENT = 5.0    # 익절 비율 (%)
 ```
 ENV_MODE=demo
 TRADING_ENABLED=false
+LOSS_SELL_BLOCK_ENABLED=true
+LOSS_SELL_BLOCK_THRESHOLD_PERCENT=5.0
 ```
 
 `.env.sample`을 복사하여 `.env`로 변경한 뒤 값을 환경에 맞게 수정하세요.
