@@ -20,6 +20,7 @@ from trading_bot.utils.logger import setup_logger, setup_legacy_logger
 from trading_bot.config import Config
 from trading_bot.utils.fees import calculate_fees_and_taxes
 from trading_bot.utils.risk import calculate_pnl_pct, should_force_stop_loss
+from trading_bot.utils.ma_screening import ScreeningConfig, screen_historical_data
 
 
 class BacktestEngine:
@@ -216,7 +217,9 @@ class BacktestEngine:
             broker: Optional[KISBroker] = None,
             db_path: Optional[Path] = None,
             use_fdr: bool = False,
-            data_start_date: Optional[str] = None) -> dict:
+            data_start_date: Optional[str] = None,
+            enable_universe_screening: bool = False,
+            screening_config: Optional[ScreeningConfig] = None) -> dict:
         """
         백테스트 실행
         
@@ -231,6 +234,8 @@ class BacktestEngine:
             data_start_date: 데이터 로드 시작일 (YYYYMMDD, 워밍업 기간 포함)
                            - 없으면 start_date 사용
                            - 이동평균 등 지표 계산을 위해 start_date보다 이전부터 데이터 로드
+            enable_universe_screening: 백테스트 시작 전 유니버스 스크리닝 적용 여부
+            screening_config: 유니버스 스크리닝 설정
             
         Returns:
             백테스트 결과 딕셔너리
@@ -309,6 +314,32 @@ class BacktestEngine:
             self.logger.warning(f"데이터 부족으로 제외된 종목: {', '.join(excluded)}")
         
         historical_data = valid_data
+
+        if enable_universe_screening:
+            try:
+                cfg = screening_config or ScreeningConfig()
+                selected_symbols, selected_df = screen_historical_data(
+                    historical_data=historical_data,
+                    cfg=cfg,
+                    reference_start_date=start_date,
+                )
+
+                if selected_symbols:
+                    symbols = selected_symbols
+                    historical_data = {sym: historical_data[sym] for sym in symbols if sym in historical_data}
+                    self.logger.info(
+                        f"백테스트 유니버스 스크리닝 적용: {len(symbols)}개 선정 "
+                        f"(기준: 거래대금20>={cfg.min_avg_value:,.0f}, ADX>={cfg.adx_threshold}, "
+                        f"Close>MA{cfg.trend_ma_period}, ATR%={cfg.atr_pct_min}~{cfg.atr_pct_max})"
+                    )
+                    self.logger.info(f"선정 종목: {', '.join(symbols)}")
+                else:
+                    self.logger.warning("백테스트 유니버스 스크리닝 통과 종목 없음 - 원본 symbols 유지")
+
+                if selected_df is not None and not selected_df.empty:
+                    self.logger.debug(f"백테스트 스크리닝 결과(상위):\n{selected_df.head(20).to_string(index=False)}")
+            except Exception as e:
+                self.logger.error(f"백테스트 유니버스 스크리닝 오류: {e} - 원본 symbols 유지")
         
         # 모든 거래일 수집 (합집합)
         all_dates = set()

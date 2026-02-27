@@ -207,6 +207,65 @@ class Config:
     MA_SHORT_PERIOD = 5   # 단기 이동평균 (5일)
     MA_LONG_PERIOD = 20   # 장기 이동평균 (20일)
 
+    # MA 유니버스 스크리닝 설정
+    _raw_ma_screening_enabled = os.environ.get("MA_SCREENING_ENABLED", "0")
+    if isinstance(_raw_ma_screening_enabled, bool):
+        MA_SCREENING_ENABLED = _raw_ma_screening_enabled
+    else:
+        MA_SCREENING_ENABLED = str(_raw_ma_screening_enabled).strip().lower() in ("1", "true", "yes", "on")
+
+    try:
+        MA_SCREENING_MIN_AVG_VALUE = float(os.environ.get("MA_SCREENING_MIN_AVG_VALUE", str(10_000_000_000)))
+    except Exception:
+        MA_SCREENING_MIN_AVG_VALUE = 10_000_000_000
+
+    try:
+        MA_SCREENING_ADX_THRESHOLD = float(os.environ.get("MA_SCREENING_ADX_THRESHOLD", str(25.0)))
+    except Exception:
+        MA_SCREENING_ADX_THRESHOLD = 25.0
+
+    try:
+        MA_SCREENING_TREND_MA_PERIOD = int(os.environ.get("MA_SCREENING_TREND_MA_PERIOD", str(60)))
+    except Exception:
+        MA_SCREENING_TREND_MA_PERIOD = 60
+
+    try:
+        MA_SCREENING_ATR_PCT_MIN = float(os.environ.get("MA_SCREENING_ATR_PCT_MIN", str(1.5)))
+    except Exception:
+        MA_SCREENING_ATR_PCT_MIN = 1.5
+
+    try:
+        MA_SCREENING_ATR_PCT_MAX = float(os.environ.get("MA_SCREENING_ATR_PCT_MAX", str(8.0)))
+    except Exception:
+        MA_SCREENING_ATR_PCT_MAX = 8.0
+
+    try:
+        MA_SCREENING_TOP_N = int(os.environ.get("MA_SCREENING_TOP_N", str(20)))
+    except Exception:
+        MA_SCREENING_TOP_N = 20
+
+    # 유니버스(후보군) 자동 생성/갱신 설정
+    # 지원 값: watchlist, kospi, kosdaq, kospi_kosdaq, all,
+    #          kospi200, kosdaq150, kospi200_kosdaq150
+    UNIVERSE_TARGET = os.environ.get("UNIVERSE_TARGET", "watchlist").strip().lower()
+
+    _raw_universe_refresh_daily = os.environ.get("UNIVERSE_REFRESH_DAILY", "1")
+    if isinstance(_raw_universe_refresh_daily, bool):
+        UNIVERSE_REFRESH_DAILY = _raw_universe_refresh_daily
+    else:
+        UNIVERSE_REFRESH_DAILY = str(_raw_universe_refresh_daily).strip().lower() in ("1", "true", "yes", "on")
+
+    try:
+        UNIVERSE_MAX_SYMBOLS = int(os.environ.get("UNIVERSE_MAX_SYMBOLS", "0"))
+    except Exception:
+        UNIVERSE_MAX_SYMBOLS = 0
+
+    _raw_universe_cache_dir = os.environ.get("UNIVERSE_CACHE_DIR", str(Path(__file__).parent / "data" / "universe"))
+    _universe_cache_dir = Path(_raw_universe_cache_dir)
+    if not _universe_cache_dir.is_absolute():
+        _universe_cache_dir = ROOT_DIR / _universe_cache_dir
+    UNIVERSE_CACHE_DIR = _universe_cache_dir
+
     # 리스크 관리
     try:
         STOP_LOSS_PERCENT = float(os.environ.get("STOP_LOSS_PERCENT", str(100.0)))    # 손절 비율 (기본 100%=사실상 비활성)

@@ -35,7 +35,10 @@ def main():
     logger.info(f"환경 모드: {Config.ENV_MODE}")
     logger.info(f"거래 활성화: {Config.TRADING_ENABLED}")
     logger.info(f"스케줄 간격: {Config.SCHEDULE_INTERVAL_MINUTES}분")
-    logger.info(f"감시 종목: {Config.WATCH_LIST}")
+    logger.info(f"유니버스 타깃: {Config.UNIVERSE_TARGET}")
+    logger.info(f"유니버스 일별갱신: {Config.UNIVERSE_REFRESH_DAILY}")
+    logger.info(f"유니버스 최대종목수: {Config.UNIVERSE_MAX_SYMBOLS}")
+    logger.info(f"기본 WATCH_LIST(대체용): {Config.WATCH_LIST}")
     logger.info("=" * 70)
     
     try:

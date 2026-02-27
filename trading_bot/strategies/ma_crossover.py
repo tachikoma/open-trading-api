@@ -12,6 +12,8 @@ from trading_bot.config import Config
 from trading_bot.utils.symbols import format_symbol
 from trading_bot.utils.fees import calculate_fees_and_taxes
 from trading_bot.utils.risk import calculate_pnl_pct, should_force_stop_loss
+from trading_bot.utils.ma_screening import ScreeningConfig, screen_symbols_with_broker
+from trading_bot.utils.universe import resolve_universe_symbols
 
 
 class MovingAverageCrossover(BaseStrategy):
@@ -271,9 +273,66 @@ class MovingAverageCrossover(BaseStrategy):
         self.logger.info("=" * 50)
         self.logger.info("이동평균 교차 전략 실행")
         self.logger.info("=" * 50)
+
+        try:
+            universe_result = resolve_universe_symbols(
+                target=Config.UNIVERSE_TARGET,
+                default_symbols=list(Config.WATCH_LIST),
+                cache_dir=Config.UNIVERSE_CACHE_DIR,
+                refresh_daily=Config.UNIVERSE_REFRESH_DAILY,
+                max_symbols=Config.UNIVERSE_MAX_SYMBOLS,
+                logger=self.logger,
+            )
+            target_symbols = universe_result.symbols
+            if universe_result.csv_path:
+                self.logger.info(
+                    f"유니버스 적용: target={universe_result.target}, "
+                    f"symbols={len(target_symbols)}, file={universe_result.csv_path}"
+                )
+            else:
+                self.logger.info(f"유니버스 적용: target={universe_result.target}, symbols={len(target_symbols)}")
+        except Exception as e:
+            self.logger.error(f"유니버스 생성 실패: {e} - WATCH_LIST로 대체")
+            target_symbols = list(Config.WATCH_LIST)
+
+        if not target_symbols:
+            self.logger.warning("유니버스 종목이 비어 있어 전략 실행을 건너뜁니다.")
+            return
+
+        if Config.MA_SCREENING_ENABLED:
+            try:
+                screening_cfg = ScreeningConfig(
+                    min_avg_value=Config.MA_SCREENING_MIN_AVG_VALUE,
+                    adx_threshold=Config.MA_SCREENING_ADX_THRESHOLD,
+                    trend_ma_period=Config.MA_SCREENING_TREND_MA_PERIOD,
+                    atr_pct_min=Config.MA_SCREENING_ATR_PCT_MIN,
+                    atr_pct_max=Config.MA_SCREENING_ATR_PCT_MAX,
+                    top_n=Config.MA_SCREENING_TOP_N,
+                )
+                selected, selected_df = screen_symbols_with_broker(
+                    symbols=target_symbols,
+                    broker=self.broker,
+                    cfg=screening_cfg,
+                )
+                if selected:
+                    target_symbols = selected
+                    self.logger.info(
+                        f"유니버스 스크리닝 적용: {len(target_symbols)}개 선정 "
+                        f"(기준: 거래대금20>={screening_cfg.min_avg_value:,.0f}, "
+                        f"ADX>={screening_cfg.adx_threshold}, "
+                        f"Close>MA{screening_cfg.trend_ma_period}, "
+                        f"ATR%={screening_cfg.atr_pct_min}~{screening_cfg.atr_pct_max})"
+                    )
+                    self.logger.info(f"선정 종목: {target_symbols}")
+                else:
+                    self.logger.warning("유니버스 스크리닝 통과 종목 없음 - 기존 WATCH_LIST 사용")
+                if selected_df is not None and not selected_df.empty:
+                    self.logger.debug(f"스크리닝 결과(상위):\n{selected_df.head(10).to_string(index=False)}")
+            except Exception as e:
+                self.logger.error(f"유니버스 스크리닝 중 오류: {e} - 기존 WATCH_LIST 사용")
         
         # 감시 종목 순회
-        for symbol in Config.WATCH_LIST:
+        for symbol in target_symbols:
             try:
                 if self._check_and_execute_stop_loss(symbol):
                     continue

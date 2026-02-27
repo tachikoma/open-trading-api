@@ -34,6 +34,8 @@ from trading_bot.backtest.engine import BacktestEngine
 from trading_bot.backtest.report import BacktestReport
 from trading_bot.broker.kis_broker import KISBroker
 from trading_bot.strategies.ma_crossover import MovingAverageCrossover
+from trading_bot.utils.ma_screening import ScreeningConfig
+from trading_bot.utils.universe import resolve_universe_symbols
 
 
 def parse_args():
@@ -54,6 +56,9 @@ def parse_args():
   
   # 종목 지정
   %(prog)s --source fdr --symbols 005930 000660 035720
+
+    # 유니버스 스크리닝 적용
+    %(prog)s --source fdr --start 20220101 --end 20241231 --enable-screening --screen-top-n 15
         """
     )
     
@@ -89,6 +94,13 @@ def parse_args():
         nargs='+',
         help='백테스트 종목 리스트 (기본값: Config.WATCH_LIST)'
     )
+
+    parser.add_argument(
+        '--universe-target',
+        type=str,
+        default=Config.UNIVERSE_TARGET,
+        help='후보군 타깃 (watchlist/kospi/kosdaq/kospi_kosdaq/kospi200/kosdaq150/kospi200_kosdaq150)'
+    )
     
     parser.add_argument(
         '--capital',
@@ -115,6 +127,54 @@ def parse_args():
         type=int,
         default=20,
         help='장기 이동평균 기간 (기본값: 20)'
+    )
+
+    parser.add_argument(
+        '--enable-screening',
+        action='store_true',
+        help='백테스트 시작 전 유니버스 스크리닝(거래대금/ADX/장기MA/ATR) 적용'
+    )
+
+    parser.add_argument(
+        '--screen-min-avg-value',
+        type=float,
+        default=Config.MA_SCREENING_MIN_AVG_VALUE,
+        help='스크리닝 20일 평균 거래대금 최소값(원)'
+    )
+
+    parser.add_argument(
+        '--screen-adx-threshold',
+        type=float,
+        default=Config.MA_SCREENING_ADX_THRESHOLD,
+        help='스크리닝 ADX 최소값'
+    )
+
+    parser.add_argument(
+        '--screen-trend-ma-period',
+        type=int,
+        default=Config.MA_SCREENING_TREND_MA_PERIOD,
+        help='스크리닝 장기 추세 MA 기간'
+    )
+
+    parser.add_argument(
+        '--screen-atr-pct-min',
+        type=float,
+        default=Config.MA_SCREENING_ATR_PCT_MIN,
+        help='스크리닝 ATR%% 최소값'
+    )
+
+    parser.add_argument(
+        '--screen-atr-pct-max',
+        type=float,
+        default=Config.MA_SCREENING_ATR_PCT_MAX,
+        help='스크리닝 ATR%% 최대값'
+    )
+
+    parser.add_argument(
+        '--screen-top-n',
+        type=int,
+        default=Config.MA_SCREENING_TOP_N,
+        help='스크리닝 상위 선정 종목 수'
     )
     
     return parser.parse_args()
@@ -166,7 +226,22 @@ def main():
     data_start_date = (datetime.strptime(start_date, "%Y%m%d") - timedelta(days=warmup_days * 3)).strftime("%Y%m%d")
     
     # 종목 설정
-    symbols = args.symbols if args.symbols else Config.WATCH_LIST
+    if args.symbols:
+        symbols = args.symbols
+        universe_info = None
+    else:
+        universe_info = resolve_universe_symbols(
+            target=args.universe_target,
+            default_symbols=list(Config.WATCH_LIST),
+            cache_dir=Config.UNIVERSE_CACHE_DIR,
+            refresh_daily=Config.UNIVERSE_REFRESH_DAILY,
+            max_symbols=Config.UNIVERSE_MAX_SYMBOLS,
+        )
+        symbols = universe_info.symbols
+
+    if not symbols:
+        print("❌ 오류: 백테스트 대상 종목이 없습니다.")
+        sys.exit(1)
     
     # 데이터 소스 표시
     source_names = {
@@ -183,8 +258,32 @@ def main():
     print(f"  백테스트 기간: {start_date} ~ {end_date}")
     print(f"  데이터 로드 기간: {data_start_date} ~ {end_date} (워밍업 {warmup_days}일 포함)")
     print(f"  대상 종목: {', '.join(symbols)}")
+    if universe_info is not None:
+        if universe_info.csv_path:
+            print(f"  유니버스 파일: {universe_info.csv_path}")
+        print(f"  유니버스 타깃: {universe_info.target} ({len(symbols)}종목)")
     print(f"  전략: 이동평균 교차 (단기 {args.short_period}일, 장기 {args.long_period}일)")
+    if args.enable_screening:
+        print(
+            "  유니버스 스크리닝: ON "
+            f"(거래대금20>={args.screen_min_avg_value:,.0f}, "
+            f"ADX>={args.screen_adx_threshold}, "
+            f"Close>MA{args.screen_trend_ma_period}, "
+            f"ATR%={args.screen_atr_pct_min}~{args.screen_atr_pct_max}, "
+            f"TOP {args.screen_top_n})"
+        )
+    else:
+        print("  유니버스 스크리닝: OFF")
     print()
+
+    screening_cfg = ScreeningConfig(
+        min_avg_value=args.screen_min_avg_value,
+        adx_threshold=args.screen_adx_threshold,
+        trend_ma_period=args.screen_trend_ma_period,
+        atr_pct_min=args.screen_atr_pct_min,
+        atr_pct_max=args.screen_atr_pct_max,
+        top_n=args.screen_top_n,
+    )
     
     # Broker 초기화 (API 사용 시)
     broker = None
@@ -222,7 +321,10 @@ def main():
                 symbols=symbols,
                 start_date=start_date,
                 end_date=end_date,
-                use_fdr=True
+                use_fdr=True,
+                data_start_date=data_start_date,
+                enable_universe_screening=args.enable_screening,
+                screening_config=screening_cfg,
             )
         elif args.source == 'db':
             results = engine.run(
@@ -230,7 +332,10 @@ def main():
                 symbols=symbols,
                 start_date=start_date,
                 end_date=end_date,
-                db_path=Path(args.db_path)
+                db_path=Path(args.db_path),
+                data_start_date=data_start_date,
+                enable_universe_screening=args.enable_screening,
+                screening_config=screening_cfg,
             )
         else:  # api
             results = engine.run(
@@ -238,7 +343,10 @@ def main():
                 symbols=symbols,
                 start_date=start_date,
                 end_date=end_date,
-                broker=broker
+                broker=broker,
+                data_start_date=data_start_date,
+                enable_universe_screening=args.enable_screening,
+                screening_config=screening_cfg,
             )
         
         if not results or not results.get('trades'):
