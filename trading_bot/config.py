@@ -209,9 +209,20 @@ class Config:
 
     # 리스크 관리
     try:
-        STOP_LOSS_PERCENT = float(os.environ.get("STOP_LOSS_PERCENT", str(3.0)))    # 손절 비율 (기본 3%)
+        STOP_LOSS_PERCENT = float(os.environ.get("STOP_LOSS_PERCENT", str(100.0)))    # 손절 비율 (기본 100%=사실상 비활성)
     except Exception:
-        STOP_LOSS_PERCENT = 3.0
+        STOP_LOSS_PERCENT = 100.0
+
+    _raw_stop_loss_cooldown_enabled = os.environ.get("STOP_LOSS_COOLDOWN_ENABLED", "0")
+    if isinstance(_raw_stop_loss_cooldown_enabled, bool):
+        STOP_LOSS_COOLDOWN_ENABLED = _raw_stop_loss_cooldown_enabled
+    else:
+        STOP_LOSS_COOLDOWN_ENABLED = str(_raw_stop_loss_cooldown_enabled).strip().lower() in ("1", "true", "yes", "on")
+
+    try:
+        STOP_LOSS_COOLDOWN_DAYS = int(os.environ.get("STOP_LOSS_COOLDOWN_DAYS", str(5)))
+    except Exception:
+        STOP_LOSS_COOLDOWN_DAYS = 5
 
     _raw_loss_sell_block_enabled = os.environ.get("LOSS_SELL_BLOCK_ENABLED", "0")
     if isinstance(_raw_loss_sell_block_enabled, bool):

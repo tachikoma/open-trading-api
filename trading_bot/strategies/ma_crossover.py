@@ -11,6 +11,7 @@ from trading_bot.broker import KISBroker
 from trading_bot.config import Config
 from trading_bot.utils.symbols import format_symbol
 from trading_bot.utils.fees import calculate_fees_and_taxes
+from trading_bot.utils.risk import calculate_pnl_pct, should_force_stop_loss
 
 
 class MovingAverageCrossover(BaseStrategy):
@@ -274,6 +275,9 @@ class MovingAverageCrossover(BaseStrategy):
         # 감시 종목 순회
         for symbol in Config.WATCH_LIST:
             try:
+                if self._check_and_execute_stop_loss(symbol):
+                    continue
+
                 signal = self.get_signal(symbol)
                 
                 if signal is None:
@@ -291,6 +295,85 @@ class MovingAverageCrossover(BaseStrategy):
                 self.logger.error(f"[{format_symbol(symbol)}] 전략 실행 중 오류: {e}")
         
         self.logger.info("전략 실행 완료")
+
+    @staticmethod
+    def _safe_to_float(value) -> Optional[float]:
+        """문자/숫자 혼합 값을 안전하게 float로 변환합니다."""
+        if value is None:
+            return None
+        try:
+            return float(str(value).replace(",", "").strip())
+        except Exception:
+            return None
+
+    def _extract_avg_buy_price(self, holding_row: pd.Series) -> Optional[float]:
+        """잔고 행에서 평균매수가를 추출합니다."""
+        avg_price_keys = [
+            "pchs_avg_pric",
+            "pchs_avg_pric_amt",
+            "avg_unpr",
+            "pchs_unpr",
+            "avg_buy_price",
+        ]
+        for key in avg_price_keys:
+            if key in holding_row:
+                avg_price = self._safe_to_float(holding_row.get(key))
+                if avg_price is not None and avg_price > 0:
+                    return avg_price
+        return None
+
+    def _check_and_execute_stop_loss(self, symbol: str) -> bool:
+        """손절 조건 충족 시 강제 매도를 실행하고 True를 반환합니다."""
+        try:
+            holdings_df, _ = self.broker.get_balance()
+            if holdings_df is None or holdings_df.empty or 'pdno' not in holdings_df.columns:
+                return False
+
+            holding = holdings_df[holdings_df['pdno'] == symbol]
+            if holding.empty:
+                return False
+
+            qty = int(self._safe_to_float(holding.iloc[0].get('hldg_qty')) or 0)
+            if qty <= 0:
+                return False
+
+            avg_price = self._extract_avg_buy_price(holding.iloc[0])
+            if avg_price is None:
+                self.logger.warning(
+                    f"[{format_symbol(symbol)}] 평균매수가 컬럼을 찾지 못해 손절 체크를 스킵합니다. "
+                    f"컬럼={list(holding.columns)}"
+                )
+                return False
+
+            price_df = self.broker.get_current_price(symbol)
+            if price_df is None or price_df.empty:
+                return False
+
+            current_price = self._safe_to_float(price_df.iloc[0].get('stck_prpr'))
+            if current_price is None or current_price <= 0:
+                return False
+
+            pnl_pct = calculate_pnl_pct(current_price=current_price, avg_buy_price=avg_price)
+            if pnl_pct is None:
+                return False
+
+            if should_force_stop_loss(
+                current_price=current_price,
+                avg_buy_price=avg_price,
+                stop_loss_percent=Config.STOP_LOSS_PERCENT,
+            ):
+                self.logger.warning(
+                    f"[{format_symbol(symbol)}] STOP_LOSS 강제매도 트리거: 현재가={current_price:.0f}, "
+                    f"평균매수가={avg_price:.0f}, 손익률={pnl_pct:.2f}% "
+                    f"(기준=-{Config.STOP_LOSS_PERCENT:.2f}%)"
+                )
+                self._execute_sell(symbol)
+                return True
+
+            return False
+        except Exception as e:
+            self.logger.error(f"[{format_symbol(symbol)}] 손절 체크 중 오류: {e}")
+            return False
     
     def _execute_buy(self, symbol: str):
         """
