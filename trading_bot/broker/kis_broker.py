@@ -286,6 +286,8 @@ class KISBroker:
                         except Exception as auth_e:
                             self.logger.error(f"토큰 재발급 실패(결과 기반): {auth_e}")
                             raise TokenRefreshError(str(auth_e))
+                except TokenRefreshError:
+                    raise
                 except Exception:
                     # 헬퍼 내부 오류는 무시하고 정상 흐름 유지
                     pass
@@ -349,6 +351,28 @@ class KISBroker:
                 return result
 
             except Exception as e:
+                # 토큰 만료 감지시 자동 갱신 시도 (중앙 헬퍼 사용)
+                try:
+                    if is_token_expired_response(e):
+                        self.logger.warning(f"토큰 만료 응답 감지: {e} (시도 {attempt}/{max_retries})")
+                        svr = getattr(self, "_svr", ("prod" if self.env_mode == "real" else "vps"))
+                        try:
+                            refresh_token(ka, svr, self.logger, delay_sec=delay_sec)
+                            if attempt < max_retries:
+                                continue
+                            else:
+                                raise TokenRefreshError("토큰 재발급 후에도 실패")
+                        except TokenRefreshError:
+                            raise
+                        except Exception as auth_e:
+                            self.logger.error(f"토큰 재발급 실패: {auth_e}")
+                            raise TokenRefreshError(str(auth_e))
+                except TokenRefreshError:
+                    raise
+                except Exception:
+                    # 헬퍼 내부 오류는 무시하고 기존 흐름으로 진행
+                    pass
+
                 # 예외 기반 재시도 판단: check_result에 예외를 전달해 의사결정 위임
                 if callable(check_result):
                     try:
@@ -369,25 +393,6 @@ class KISBroker:
                             continue
                         else:
                             raise
-                # 토큰 만료 감지시 자동 갱신 시도 (중앙 헬퍼 사용)
-                try:
-                    if is_token_expired_response(e):
-                        self.logger.warning(f"토큰 만료 응답 감지: {e} (시도 {attempt}/{max_retries})")
-                        svr = getattr(self, "_svr", ("prod" if self.env_mode == "real" else "vps"))
-                        try:
-                            refresh_token(ka, svr, self.logger, delay_sec=delay_sec)
-                            if attempt < max_retries:
-                                continue
-                            else:
-                                raise TokenRefreshError("토큰 재발급 후에도 실패")
-                        except TokenRefreshError:
-                            raise
-                        except Exception as auth_e:
-                            self.logger.error(f"토큰 재발급 실패: {auth_e}")
-                            raise TokenRefreshError(str(auth_e))
-                except Exception:
-                    # 헬퍼 내부 오류는 무시하고 기존 흐름으로 진행
-                    pass
 
                 # 기존 예외 메시지 기반 재시도 (rate limit)
                 msg = str(e)

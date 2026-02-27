@@ -1,7 +1,9 @@
 import os
 import pytest
+import pandas as pd
 
 from trading_bot.broker import kis_broker
+from trading_bot.broker.auth_utils import refresh_token, TokenRefreshError, is_token_expired_response
 
 
 def test_token_refresh_on_result(tmp_path, monkeypatch):
@@ -74,3 +76,99 @@ def test_token_refresh_on_exception(tmp_path, monkeypatch):
     # 예외 경로에서도 토큰 재발급 시도되어야 함
     assert fake_ka.auth_called is True
     assert not token_file.exists()
+
+
+class _DummyLogger:
+    def info(self, *args, **kwargs):
+        pass
+
+    def warning(self, *args, **kwargs):
+        pass
+
+    def error(self, *args, **kwargs):
+        pass
+
+
+def test_refresh_token_raises_when_auth_returns_without_token(tmp_path, monkeypatch):
+    token_file = tmp_path / "KIS20260116"
+    token_file.write_text("dummy-token")
+
+    class FakeKA:
+        def __init__(self, token_path):
+            self.token_tmp = str(token_path)
+            self.auth_calls = 0
+
+        def auth(self, svr):
+            self.auth_calls += 1
+
+        def read_token(self):
+            return None
+
+    fake_ka = FakeKA(token_file)
+    logger = _DummyLogger()
+
+    sleep_calls = []
+    monkeypatch.setattr("trading_bot.broker.auth_utils.time.sleep", lambda sec: sleep_calls.append(sec))
+
+    with pytest.raises(TokenRefreshError):
+        refresh_token(
+            fake_ka,
+            "vps",
+            logger,
+            max_attempts=3,
+            backoff_base_sec=0.2,
+            backoff_multiplier=2.0,
+            backoff_max_sec=1.0,
+        )
+
+    assert fake_ka.auth_calls == 3
+    assert sleep_calls == [0.2, 0.4]
+
+
+def test_refresh_token_succeeds_after_retry(tmp_path, monkeypatch):
+    token_file = tmp_path / "KIS20260116"
+    token_file.write_text("dummy-token")
+
+    class FakeKA:
+        def __init__(self, token_path):
+            self.token_tmp = str(token_path)
+            self.auth_calls = 0
+            self._has_token = False
+
+        def auth(self, svr):
+            self.auth_calls += 1
+            if self.auth_calls >= 2:
+                self._has_token = True
+
+        def read_token(self):
+            return "new-token" if self._has_token else None
+
+    fake_ka = FakeKA(token_file)
+    logger = _DummyLogger()
+
+    sleep_calls = []
+    monkeypatch.setattr("trading_bot.broker.auth_utils.time.sleep", lambda sec: sleep_calls.append(sec))
+
+    refresh_token(
+        fake_ka,
+        "vps",
+        logger,
+        delay_sec=0.1,
+        max_attempts=3,
+        backoff_base_sec=0.2,
+        backoff_multiplier=2.0,
+        backoff_max_sec=1.0,
+    )
+
+    assert fake_ka.auth_calls == 2
+    assert sleep_calls == [0.2, 0.1]
+
+
+def test_is_token_expired_response_from_dataframe_attrs_payload():
+    df = pd.DataFrame()
+    df.attrs["error_payload"] = {
+        "http_status": 500,
+        "http_body_truncated": '{"rt_cd":"1","msg1":"기간이 만료된 token 입니다.","msg_cd":"EGW00123"}',
+    }
+
+    assert is_token_expired_response(df) is True
