@@ -195,8 +195,11 @@ MA_LONG_PERIOD = 20   # 장기 이동평균 (일)
 
 # 리스크 관리
 MAX_POSITION_SIZE = 1000000  # 최대 투자 금액 (원)
-STOP_LOSS_PERCENT = 3.0      # 손절 비율 (%)
-TAKE_PROFIT_PERCENT = 5.0    # 익절 비율 (%)
+STOP_LOSS_PERCENT = 100.0    # 손절 비율 (%), 100이면 사실상 손절 비활성
+STOP_LOSS_COOLDOWN_ENABLED = False         # 손절 후 재진입 쿨다운 사용 여부
+STOP_LOSS_COOLDOWN_DAYS = 5                # 손절 후 재진입 제한 거래일 수
+LOSS_SELL_BLOCK_ENABLED = True              # 손실 매도 제한 사용 여부
+LOSS_SELL_BLOCK_THRESHOLD_PERCENT = 5.0     # 손실 매도 제한 임계값 (%)
 ```
 
 ### 환경 변수 및 .env 파일
@@ -205,6 +208,19 @@ TAKE_PROFIT_PERCENT = 5.0    # 익절 비율 (%)
 - 주요 키:
   - `ENV_MODE`: `real` 또는 `demo`
   - `TRADING_ENABLED`: 실제 주문 활성화 여부 (`true`/`false`, `1`/`0`, `yes`/`no` 허용)
+  - `STOP_LOSS_PERCENT`: 고정 손절 비율(%)
+  - `STOP_LOSS_COOLDOWN_ENABLED`: 손절 후 재진입 쿨다운 활성화 여부 (`true`/`false`, `1`/`0`, `yes`/`no` 허용)
+  - `STOP_LOSS_COOLDOWN_DAYS`: 손절 후 재진입 제한 거래일 수
+  - `LOSS_SELL_BLOCK_ENABLED`: 손실 매도 제한 활성화 여부 (`true`/`false`, `1`/`0`, `yes`/`no` 허용)
+  - `LOSS_SELL_BLOCK_THRESHOLD_PERCENT`: 손실 매도 제한 임계값(%)
+
+- 적용 우선순위:
+  - `STOP_LOSS_PERCENT` 강제매도 > 일반 전략 매도 시그널 > `LOSS_SELL_BLOCK_*` 제한
+
+- 장기/다종목(20170101~20241231, 현재 감시종목) 백테스트 기반 운영 권장:
+  - **권장 기본값**: `STOP_LOSS_PERCENT=100.0`, `STOP_LOSS_COOLDOWN_ENABLED=0`
+  - **대안(방어형)**: `STOP_LOSS_PERCENT=8.0`, `STOP_LOSS_COOLDOWN_ENABLED=0`
+  - **추가 해석**: 2~5%처럼 촘촘한 고정 손절은 강제청산 빈도를 크게 늘려 수익 추세를 끊을 수 있으므로, 장기/다종목 운용에서는 과민반응 가능성이 큽니다.
 
 - 파일 위치(프로젝트 루트):
   - `./.env`  (실사용 파일 — 민감정보 포함 시 커밋 금지)
@@ -215,6 +231,11 @@ TAKE_PROFIT_PERCENT = 5.0    # 익절 비율 (%)
 ```
 ENV_MODE=demo
 TRADING_ENABLED=false
+STOP_LOSS_PERCENT=100.0
+STOP_LOSS_COOLDOWN_ENABLED=0
+STOP_LOSS_COOLDOWN_DAYS=5
+LOSS_SELL_BLOCK_ENABLED=true
+LOSS_SELL_BLOCK_THRESHOLD_PERCENT=5.0
 ```
 
 `.env.sample`을 복사하여 `.env`로 변경한 뒤 값을 환경에 맞게 수정하세요.

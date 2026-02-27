@@ -19,6 +19,7 @@ from trading_bot.backtest.metrics import PerformanceMetrics
 from trading_bot.utils.logger import setup_logger, setup_legacy_logger
 from trading_bot.config import Config
 from trading_bot.utils.fees import calculate_fees_and_taxes
+from trading_bot.utils.risk import calculate_pnl_pct, should_force_stop_loss
 
 
 class BacktestEngine:
@@ -334,6 +335,7 @@ class BacktestEngine:
         
         # 시그널 통계
         signal_stats = {'buy': 0, 'sell': 0, 'none': 0, 'data_insufficient': 0}
+        stop_loss_cooldown_until_idx = {}
         
         # 날짜별 시뮬레이션 (워밍업 기간 이후만)
         for idx, date in enumerate(backtest_dates):
@@ -355,6 +357,33 @@ class BacktestEngine:
             for symbol in symbols:
                 if symbol not in current_prices:
                     continue
+
+                # 고정 손절(공통 규칙): 시그널보다 우선 적용
+                if symbol in self.positions:
+                    held_qty = int(self.positions[symbol].get('qty', 0))
+                    avg_price = float(self.positions[symbol].get('avg_price', 0) or 0)
+                    price = float(current_prices[symbol])
+
+                    if held_qty > 0 and avg_price > 0 and should_force_stop_loss(
+                        current_price=price,
+                        avg_buy_price=avg_price,
+                        stop_loss_percent=Config.STOP_LOSS_PERCENT,
+                    ):
+                        pnl_pct = calculate_pnl_pct(current_price=price, avg_buy_price=avg_price) or 0.0
+                        self.logger.warning(
+                            f"[{date_str}] STOP_LOSS 강제매도: {symbol} 현재가={price:.0f}, "
+                            f"평균매수가={avg_price:.0f}, 손익률={pnl_pct:.2f}% "
+                            f"(기준=-{Config.STOP_LOSS_PERCENT:.2f}%)"
+                        )
+                        self.execute_trade(symbol, 'sell', price, held_qty, date_str)
+                        if Config.STOP_LOSS_COOLDOWN_ENABLED and Config.STOP_LOSS_COOLDOWN_DAYS > 0:
+                            cooldown_until = idx + Config.STOP_LOSS_COOLDOWN_DAYS
+                            stop_loss_cooldown_until_idx[symbol] = cooldown_until
+                            self.logger.info(
+                                f"[{date_str}] STOP_LOSS 쿨다운 설정: {symbol} {Config.STOP_LOSS_COOLDOWN_DAYS}거래일 "
+                                f"(해제 인덱스={cooldown_until})"
+                            )
+                        continue
                 
                 # 해당 종목의 과거 데이터 전달
                 symbol_data = historical_data[symbol]
@@ -385,6 +414,15 @@ class BacktestEngine:
                 price = current_prices[symbol]
                 
                 if action == 'buy':
+                    if Config.STOP_LOSS_COOLDOWN_ENABLED and Config.STOP_LOSS_COOLDOWN_DAYS > 0:
+                        cooldown_until = stop_loss_cooldown_until_idx.get(symbol)
+                        if cooldown_until is not None and idx <= cooldown_until:
+                            self.logger.info(
+                                f"[{date_str}] STOP_LOSS 쿨다운으로 매수 스킵: {symbol} "
+                                f"(남은 {cooldown_until - idx + 1}거래일)"
+                            )
+                            continue
+
                     # 가용 자금의 일정 비율로 매수
                     max_investment = min(self.cash * 0.3, Config.MAX_ORDER_AMOUNT)
                     quantity = int(max_investment / price)
@@ -396,6 +434,17 @@ class BacktestEngine:
                     # 보유 중이면 전량 매도
                     if symbol in self.positions:
                         quantity = self.positions[symbol]['qty']
+                        if Config.LOSS_SELL_BLOCK_ENABLED and quantity > 0:
+                            avg_price = self.positions[symbol].get('avg_price', 0)
+                            if avg_price > 0:
+                                pnl_pct = ((price - avg_price) / avg_price) * 100
+                                if pnl_pct < -Config.LOSS_SELL_BLOCK_THRESHOLD_PERCENT:
+                                    self.logger.info(
+                                        f"[{date_str}] 손실 매도 제한으로 매도 스킵: {symbol} 현재가={price:.0f}, "
+                                        f"평균매수가={avg_price:.0f}, 손익률={pnl_pct:.2f}% "
+                                        f"(기준=-{Config.LOSS_SELL_BLOCK_THRESHOLD_PERCENT:.2f}%)"
+                                    )
+                                    continue
                         self.execute_trade(symbol, 'sell', price, quantity, date_str)
             
             # 일별 자산 가치 기록

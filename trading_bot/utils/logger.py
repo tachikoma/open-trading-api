@@ -10,6 +10,20 @@ from typing import Union
 from trading_bot.config import Config
 
 
+def _apply_third_party_logger_levels(level: str):
+    """외부 라이브러리 로거 레벨 적용"""
+    # matplotlib는 폰트 탐색 DEBUG 로그가 매우 많아 별도 레벨로 제어
+    mpl_level = getattr(logging, Config.MATPLOTLIB_LOG_LEVEL, logging.WARNING)
+    logging.getLogger("matplotlib").setLevel(mpl_level)
+    logging.getLogger("matplotlib.font_manager").setLevel(mpl_level)
+
+    # DEBUG 모드일 때만 HTTP 디버그 로그 활성화
+    if level == "DEBUG":
+        logging.getLogger("urllib3").setLevel(logging.DEBUG)
+        logging.getLogger("requests").setLevel(logging.DEBUG)
+        logging.getLogger("http.client").setLevel(logging.DEBUG)
+
+
 def setup_logger(name: str, log_dir: Path, level: str = "INFO"):
     """
     로거 설정
@@ -107,16 +121,8 @@ def setup_logger(name: str, log_dir: Path, level: str = "INFO"):
         console_handler.setFormatter(formatter)
         root_logger.addHandler(console_handler)
 
-    # --- 외부 라이브러리 로거 설정 (DEBUG 로그 활성화) ---
-    # urllib3의 DEBUG 로그를 보려면 urllib3 로거를 명시적으로 설정해야 합니다.
-    # 루트 로거의 레벨만으로는 urllib3의 DEBUG 로그가 전파되지 않습니다.
-    if level == "DEBUG":
-        # urllib3: HTTP 연결, 요청/응답 상세 로그
-        logging.getLogger("urllib3").setLevel(logging.DEBUG)
-        # requests: HTTP 요청 상세 로그
-        logging.getLogger("requests").setLevel(logging.DEBUG)
-        # httplib: HTTP 프로토콜 레벨 로그
-        logging.getLogger("http.client").setLevel(logging.DEBUG)
+    # --- 외부 라이브러리 로거 설정 ---
+    _apply_third_party_logger_levels(level)
 
     # --- 모듈별 로거 설정: 핸들러 제거하고 전파 활성화 (루트 로거의 핸들러 사용) ---
     # Remove any FileHandler attached directly to the module logger to avoid duplicate files
@@ -183,5 +189,8 @@ def setup_legacy_logger(name: str, log_dir: Path, level: str = "INFO"):
 
     # 파일 핸들러를 사용하므로 전파를 비활성화
     logger.propagate = False
+
+    # 레거시 로거 경로에서도 외부 라이브러리 레벨 제어를 동일하게 적용
+    _apply_third_party_logger_levels(level)
 
     return logger
