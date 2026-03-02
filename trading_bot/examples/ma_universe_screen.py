@@ -27,7 +27,8 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from trading_bot.config import Config
 from trading_bot.broker.kis_broker import KISBroker
-from trading_bot.utils.ma_screening import ScreeningConfig, screen_symbols_with_broker
+from trading_bot.broker.auth_utils import TokenRefreshError
+from trading_bot.utils.ma_screening import ScreeningConfig, screen_symbols_with_broker, diagnose_symbols_with_broker
 
 
 def _load_symbols(path: Optional[str]) -> list[str]:
@@ -54,9 +55,20 @@ def run(
     atr_pct_max: float,
     top_n: int,
     output_csv: Optional[str],
+    debug_screen: bool,
 ) -> int:
     Config.validate()
-    broker = KISBroker(env_mode=env_mode)
+    try:
+        broker = KISBroker(env_mode=env_mode)
+    except Exception as e:
+        print(f"브로커 초기화 실패: {e}")
+        print("확인 항목:")
+        print("1) ~/KIS/config/kis_devlp.yaml 설정이 올바른지 확인")
+        print(f"2) 현재 실행 모드(--env-mode): {env_mode}")
+        print("   - 실전: my_app/my_sec")
+        print("   - 모의: paper_app/paper_sec")
+        print("3) 필요 시 --env-mode demo 로 재시도")
+        return 1
 
     cfg = ScreeningConfig(
         min_avg_value=min_avg_value,
@@ -67,14 +79,59 @@ def run(
         top_n=top_n,
     )
 
-    selected, passed_df = screen_symbols_with_broker(
-        symbols=symbols,
-        broker=broker,
-        cfg=cfg,
-    )
+    try:
+        selected, passed_df = screen_symbols_with_broker(
+            symbols=symbols,
+            broker=broker,
+            cfg=cfg,
+        )
+    except TokenRefreshError as e:
+        print(f"토큰 재발급 실패로 스크리닝을 중단합니다: {e}")
+        print("실전 모드라면 my_app/my_sec, 모의 모드라면 paper_app/paper_sec를 확인하세요.")
+        return 1
 
     if passed_df is None or passed_df.empty:
         print("조건 계산 가능한 종목이 없습니다.")
+        if debug_screen:
+            diag_df = diagnose_symbols_with_broker(symbols=symbols, broker=broker, cfg=cfg)
+            if diag_df is not None and not diag_df.empty:
+                print("\n=== 디버그: 계산 불가 원인 ===")
+                columns = [
+                    "symbol",
+                    "reason",
+                    "raw_rows",
+                    "rows_after_dropna",
+                    "min_needed_rows",
+                    "open_col",
+                    "high_col",
+                    "low_col",
+                    "close_col",
+                    "volume_col",
+                    "missing_required",
+                    "pass_liquidity",
+                    "pass_adx",
+                    "pass_trend",
+                    "pass_volatility",
+                ]
+                available_cols = [col for col in columns if col in diag_df.columns]
+                preview = diag_df[available_cols].copy()
+
+                if "reason" in preview.columns:
+                    unscorable = preview[preview["reason"] != "filtered_out"]
+                    filtered = preview[preview["reason"] == "filtered_out"]
+
+                    if not unscorable.empty:
+                        print("\n[진짜 계산 불가]")
+                        print(unscorable.sort_values(["reason", "symbol"]).to_string(index=False))
+                    else:
+                        print("\n[진짜 계산 불가]")
+                        print("없음")
+
+                    if not filtered.empty:
+                        print("\n[조건 미통과(filtered_out)]")
+                        print(filtered.sort_values(["symbol"]).to_string(index=False))
+                else:
+                    print(preview.to_string(index=False))
         return 1
 
     print("\n=== 스크리닝 요약 ===")
@@ -137,6 +194,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--atr-pct-max", type=float, default=8.0, help="ATR%% 최대")
     parser.add_argument("--top-n", type=int, default=20, help="상위 출력 종목 수")
     parser.add_argument("--output-csv", default="", help="결과 CSV 저장 경로")
+    parser.add_argument("--debug-screen", action="store_true", help="계산 불가 종목의 상세 원인 출력")
     return parser.parse_args()
 
 
@@ -159,6 +217,7 @@ def main() -> int:
         atr_pct_max=args.atr_pct_max,
         top_n=args.top_n,
         output_csv=output_csv,
+        debug_screen=args.debug_screen,
     )
 
 

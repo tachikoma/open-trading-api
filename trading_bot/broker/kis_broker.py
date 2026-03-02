@@ -82,8 +82,34 @@ class KISBroker:
             svr = "prod" if self.env_mode == "real" else "vps"
             self._svr = svr
 
+            # examples_user.kis_auth는 기본 토큰 파일명을 날짜만으로 구성하여
+            # 실전/모의 전환 시 서로 다른 서버 토큰이 충돌할 수 있습니다.
+            # 서버 구분자를 붙인 파일명을 사용해 모드별 토큰을 분리합니다.
+            try:
+                cfg_root = getattr(ka, "config_root", None)
+                if not cfg_root:
+                    cfg_root = os.path.join(os.path.expanduser("~"), "KIS", "config")
+                os.makedirs(cfg_root, exist_ok=True)
+                token_mode_path = os.path.join(cfg_root, f"KIS{time.strftime('%Y%m%d')}_{svr}")
+                setattr(ka, "token_tmp", token_mode_path)
+                if not os.path.exists(token_mode_path):
+                    with open(token_mode_path, "a", encoding="utf-8"):
+                        pass
+            except Exception as token_path_e:
+                self.logger.debug(f"모드별 토큰 파일 설정 실패(기본 경로 사용): {token_path_e}")
+
             # KIS 인증 수행 (토큰 자동 재발급)
             ka.auth(svr=svr)
+
+            # auth()는 실패 시 예외를 던지지 않고 return 할 수 있으므로
+            # 실제 유효 토큰 존재 여부를 즉시 검증해 조기에 실패시킵니다.
+            read_token_fn = getattr(ka, "read_token", None)
+            if callable(read_token_fn) and not read_token_fn():
+                raise RuntimeError(
+                    f"KIS 토큰 발급에 실패했습니다. (서버: {svr}) "
+                    f"~/KIS/config/kis_devlp.yaml의 {'my_app/my_sec' if svr == 'prod' else 'paper_app/paper_sec'} 설정을 확인하세요."
+                )
+
             # --- monkey-patch: examples_user의 printError 출력이 stdout으로만 가는 문제를 보정
             # APIResp.printError / APIRespError.printError를 덮어써서
             # print() 대신 broker의 logger로 기록하도록 합니다.
@@ -211,6 +237,9 @@ class KISBroker:
                             except TokenRefreshError as tr_e:
                                 self.logger.error(f"사전 토큰 재발급 실패: {tr_e}")
                                 raise
+                except TokenRefreshError:
+                    # 치명적 인증 오류는 즉시 상위로 전파하여 불필요한 반복 호출을 막습니다.
+                    raise
                 except Exception as pre_e:
                     # 토큰 검사/재발급 중 문제 발생해도 호출 시도를 계속 진행하도록 경고만 로깅
                     self.logger.warning(f"사전 토큰 검사/재발급 중 오류: {pre_e}")
@@ -351,6 +380,11 @@ class KISBroker:
                 return result
 
             except Exception as e:
+                # 이미 토큰 재발급 실패로 판정된 예외는 즉시 전파하여
+                # 동일 호출 내 중복 재발급 시도를 방지합니다.
+                if isinstance(e, TokenRefreshError):
+                    raise
+
                 # 토큰 만료 감지시 자동 갱신 시도 (중앙 헬퍼 사용)
                 try:
                     if is_token_expired_response(e):
@@ -819,6 +853,8 @@ class KISBroker:
                 check_result=self._check_retry_on_empty_or_rate_limit
             )
             return df
+        except TokenRefreshError:
+            raise
         except Exception as e:
             self.logger.error(f"현재가 조회 실패 ({symbol}): {e}")
             return None
@@ -845,6 +881,8 @@ class KISBroker:
                 check_result=self._check_retry_on_empty_or_rate_limit
             )
             return df
+        except TokenRefreshError:
+            raise
         except Exception as e:
             self.logger.error(f"일별 시세 조회 실패 ({symbol}): {e}")
             return None
@@ -875,6 +913,8 @@ class KISBroker:
                 check_result=self._check_retry_on_empty_or_rate_limit
             )
             return output2  # output2에 일별 시세 데이터가 있음
+        except TokenRefreshError:
+            raise
         except Exception as e:
             self.logger.error(f"기간별 시세 조회 실패 ({symbol}): {e}")
             return None

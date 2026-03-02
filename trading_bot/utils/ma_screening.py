@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Dict, Iterable, Optional, Tuple
+from typing import Any, Dict, Iterable, Optional, Tuple
 
 import pandas as pd
 
@@ -46,9 +46,24 @@ def pick_col(df: pd.DataFrame, candidates: list[str], must_numeric: bool = True)
     return None
 
 
-def normalize_ohlcv(raw: pd.DataFrame) -> Optional[pd.DataFrame]:
+def normalize_ohlcv(raw: pd.DataFrame, return_meta: bool = False) -> Optional[pd.DataFrame] | Tuple[Optional[pd.DataFrame], dict[str, Any]]:
+    meta: dict[str, Any] = {
+        "raw_rows": 0,
+        "date_col": None,
+        "open_col": None,
+        "high_col": None,
+        "low_col": None,
+        "close_col": None,
+        "volume_col": None,
+        "rows_after_dropna": 0,
+        "reason": None,
+    }
+
     if raw is None or raw.empty:
-        return None
+        meta["reason"] = "raw_empty"
+        return (None, meta) if return_meta else None
+
+    meta["raw_rows"] = len(raw)
 
     date_col = pick_col(raw, ["stck_bsop_date", "xymd", "date"], must_numeric=False)
     open_col = pick_col(raw, ["stck_oprc", "open"])
@@ -57,9 +72,29 @@ def normalize_ohlcv(raw: pd.DataFrame) -> Optional[pd.DataFrame]:
     close_col = pick_col(raw, ["stck_clpr", "close", "stck_prpr", "prpr"])
     volume_col = pick_col(raw, ["acml_vol", "cntg_vol", "volume", "vol"])
 
+    meta["date_col"] = date_col
+    meta["open_col"] = open_col
+    meta["high_col"] = high_col
+    meta["low_col"] = low_col
+    meta["close_col"] = close_col
+    meta["volume_col"] = volume_col
+
     required = [open_col, high_col, low_col, close_col, volume_col]
     if any(col is None for col in required):
-        return None
+        missing_cols = [
+            name
+            for name, col in [
+                ("open", open_col),
+                ("high", high_col),
+                ("low", low_col),
+                ("close", close_col),
+                ("volume", volume_col),
+            ]
+            if col is None
+        ]
+        meta["missing_required"] = ",".join(missing_cols)
+        meta["reason"] = "missing_required_columns"
+        return (None, meta) if return_meta else None
 
     df = pd.DataFrame(
         {
@@ -79,9 +114,13 @@ def normalize_ohlcv(raw: pd.DataFrame) -> Optional[pd.DataFrame]:
         df = df.iloc[::-1].reset_index(drop=True)
 
     df = df.dropna(subset=["open", "high", "low", "close", "volume"])
+    meta["rows_after_dropna"] = len(df)
     if df.empty:
-        return None
-    return df
+        meta["reason"] = "all_nan_after_normalize"
+        return (None, meta) if return_meta else None
+
+    meta["reason"] = "ok"
+    return (df, meta) if return_meta else df
 
 
 def compute_adx(df: pd.DataFrame, period: int = 14) -> pd.Series:
@@ -103,7 +142,9 @@ def compute_adx(df: pd.DataFrame, period: int = 14) -> pd.Series:
     plus_di = 100 * plus_dm.ewm(alpha=1 / period, adjust=False).mean() / atr
     minus_di = 100 * minus_dm.ewm(alpha=1 / period, adjust=False).mean() / atr
 
-    dx = ((plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, pd.NA)) * 100
+    denominator = (plus_di + minus_di).replace(0, float("nan"))
+    dx = ((plus_di - minus_di).abs() / denominator) * 100
+    dx = pd.to_numeric(dx, errors="coerce")
     adx = dx.ewm(alpha=1 / period, adjust=False).mean()
     return adx
 
@@ -184,11 +225,93 @@ def screen_symbols_with_broker(
     return selected, selected_df
 
 
+def diagnose_symbols_with_broker(
+    symbols: Iterable[str],
+    broker,
+    cfg: ScreeningConfig,
+    lookback_days: int = 370,
+) -> pd.DataFrame:
+    rows: list[dict[str, Any]] = []
+    end_date = datetime.now().strftime("%Y%m%d")
+    start_date = (datetime.now() - timedelta(days=lookback_days)).strftime("%Y%m%d")
+    min_needed = max(30, cfg.trend_ma_period + 2)
+
+    for symbol in symbols:
+        entry: dict[str, Any] = {
+            "symbol": symbol,
+            "reason": "unknown",
+            "raw_rows": 0,
+            "rows_after_dropna": 0,
+            "min_needed_rows": min_needed,
+            "date_col": None,
+            "open_col": None,
+            "high_col": None,
+            "low_col": None,
+            "close_col": None,
+            "volume_col": None,
+            "missing_required": None,
+        }
+
+        try:
+            raw = broker.get_period_price(symbol, start_date=start_date, end_date=end_date, period="D")
+        except Exception as e:
+            entry["reason"] = "broker_error"
+            entry["error"] = str(e)
+            rows.append(entry)
+            continue
+
+        ohlcv, meta = normalize_ohlcv(raw, return_meta=True)
+        entry.update(
+            {
+                "raw_rows": meta.get("raw_rows", 0),
+                "rows_after_dropna": meta.get("rows_after_dropna", 0),
+                "date_col": meta.get("date_col"),
+                "open_col": meta.get("open_col"),
+                "high_col": meta.get("high_col"),
+                "low_col": meta.get("low_col"),
+                "close_col": meta.get("close_col"),
+                "volume_col": meta.get("volume_col"),
+                "missing_required": meta.get("missing_required"),
+            }
+        )
+
+        if ohlcv is None:
+            entry["reason"] = meta.get("reason", "normalize_failed")
+            rows.append(entry)
+            continue
+
+        if len(ohlcv) < min_needed:
+            entry["reason"] = "insufficient_history"
+            entry["rows_after_dropna"] = len(ohlcv)
+            rows.append(entry)
+            continue
+
+        score = score_ohlcv(ohlcv, cfg)
+        if score is None:
+            entry["reason"] = "score_failed"
+            rows.append(entry)
+            continue
+
+        passed = bool(score.get("passed", False))
+        entry["passed"] = passed
+        entry["reason"] = "ok" if passed else "filtered_out"
+        entry["adx"] = score.get("adx")
+        entry["atr_pct"] = score.get("atr_pct")
+        entry["avg_trading_value_20"] = score.get("avg_trading_value_20")
+        entry["pass_liquidity"] = score.get("pass_liquidity")
+        entry["pass_adx"] = score.get("pass_adx")
+        entry["pass_trend"] = score.get("pass_trend")
+        entry["pass_volatility"] = score.get("pass_volatility")
+        rows.append(entry)
+
+    return pd.DataFrame(rows)
+
+
 def screen_historical_data(
     historical_data: Dict[str, pd.DataFrame],
     cfg: ScreeningConfig,
     reference_start_date: Optional[str] = None,
-) -> Tuple[list[str], pd.DataFrame]:
+) -> Tuple[list[str], pd.DataFrame, pd.DataFrame]:
     """
     백테스트용 스크리닝.
 
@@ -216,9 +339,9 @@ def screen_historical_data(
         rows.append(score)
 
     if not rows:
-        return [], pd.DataFrame()
+        return [], pd.DataFrame(), pd.DataFrame()
 
     df = pd.DataFrame(rows)
     selected_df = df[df["passed"]].sort_values(["avg_trading_value_20", "adx"], ascending=[False, False])
     selected = selected_df["symbol"].head(cfg.top_n).tolist()
-    return selected, selected_df
+    return selected, selected_df, df

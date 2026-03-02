@@ -266,6 +266,13 @@ class Config:
         _universe_cache_dir = ROOT_DIR / _universe_cache_dir
     UNIVERSE_CACHE_DIR = _universe_cache_dir
 
+    # FinanceDataReader 캐시 디렉토리 (Parquet 파일 저장)
+    _raw_fdr_cache_dir = os.environ.get("FDR_CACHE_DIR", str(Path(__file__).parent / "data" / "fdr_cache"))
+    _fdr_cache_dir = Path(_raw_fdr_cache_dir)
+    if not _fdr_cache_dir.is_absolute():
+        _fdr_cache_dir = ROOT_DIR / _fdr_cache_dir
+    FDR_CACHE_DIR = _fdr_cache_dir
+
     # 리스크 관리
     try:
         STOP_LOSS_PERCENT = float(os.environ.get("STOP_LOSS_PERCENT", str(100.0)))    # 손절 비율 (기본 100%=사실상 비활성)

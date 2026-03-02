@@ -8,6 +8,10 @@ class TokenRefreshError(Exception):
 
 def _contains_token_expired_keywords(text: str) -> bool:
     text = str(text).lower()
+    # 토큰 발급 빈도 제한(EGW00133)은 만료가 아니라 재발급 과다 호출 상태입니다.
+    if "egw00133" in text or "접근토큰 발급 잠시 후 다시 시도" in text:
+        return False
+
     if "egw00123" in text:
         return True
     if "토큰" in text or "토큰이" in text or "만료" in text or "만료된" in text:
@@ -17,7 +21,9 @@ def _contains_token_expired_keywords(text: str) -> bool:
     if "access_token" in text or "access token" in text:
         if "expired" in text or "expire" in text or "invalid" in text:
             return True
-    if "401" in text or "403" in text or "unauthorized" in text:
+    if ("401" in text or "403" in text or "unauthorized" in text) and (
+        "token" in text or "access_token" in text or "인증" in text or "토큰" in text
+    ):
         return True
     return False
 
@@ -127,11 +133,17 @@ def refresh_token(
         if not cfg_root:
             cfg_root = os.path.join(os.path.expanduser("~"), "KIS", "config")
         try:
-            today_candidate = os.path.join(cfg_root, f"KIS{time.strftime('%Y%m%d')}")
-            if os.path.exists(today_candidate):
-                os.remove(today_candidate)
-                logger.info(f"로컬 토큰 파일 삭제(대체경로): {today_candidate}")
-                removed_any = True
+            date_key = time.strftime("%Y%m%d")
+            # 모드별 파일명을 우선 정리한 뒤, 레거시 파일명(KISYYYYMMDD)도 함께 정리합니다.
+            candidates = [
+                os.path.join(cfg_root, f"KIS{date_key}_{svr}"),
+                os.path.join(cfg_root, f"KIS{date_key}"),
+            ]
+            for candidate in candidates:
+                if os.path.exists(candidate):
+                    os.remove(candidate)
+                    logger.info(f"로컬 토큰 파일 삭제(대체경로): {candidate}")
+                    removed_any = True
         except Exception as rem_e:
             logger.warning(f"대체 토큰 파일 삭제 시도 실패: {rem_e}")
 

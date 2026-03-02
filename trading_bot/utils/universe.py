@@ -188,9 +188,13 @@ def _is_true_series(series: pd.Series) -> pd.Series:
 
 
 def _load_listing_fdr(market: str) -> pd.DataFrame:
-    import FinanceDataReader as fdr
+    try:
+        import FinanceDataReader as fdr
 
-    df = fdr.StockListing(market)
+        df = fdr.StockListing(market)
+    except Exception:
+        return pd.DataFrame(columns=["symbol", "name", "market"])
+
     if df is None or df.empty:
         return pd.DataFrame(columns=["symbol", "name", "market"])
 
@@ -260,12 +264,20 @@ def _build_universe_df(target: str, raw_dir: Path) -> pd.DataFrame:
 
     # 1) 전체 시장 유니버스는 FDR 상장목록 사용 (안정적)
     if target in {"kospi", "kosdaq", "kospi_kosdaq", "all"}:
-        fdr_frames = []
+        market_frames = []
         if need_kospi:
-            fdr_frames.append(_load_listing_fdr("KOSPI"))
+            kospi_listing = _load_listing_fdr("KOSPI")
+            if kospi_listing.empty:
+                kospi_master = _load_kospi_master(raw_dir)
+                kospi_listing = _clean_symbols(kospi_master, code_col="단축코드", name_col="한글명", market="KOSPI")
+            market_frames.append(kospi_listing)
         if need_kosdaq:
-            fdr_frames.append(_load_listing_fdr("KOSDAQ"))
-        out = pd.concat(fdr_frames, ignore_index=True) if fdr_frames else pd.DataFrame(columns=["symbol", "name", "market"])
+            kosdaq_listing = _load_listing_fdr("KOSDAQ")
+            if kosdaq_listing.empty:
+                kosdaq_master = _load_kosdaq_master(raw_dir)
+                kosdaq_listing = _clean_symbols(kosdaq_master, code_col="단축코드", name_col="한글종목명", market="KOSDAQ")
+            market_frames.append(kosdaq_listing)
+        out = pd.concat(market_frames, ignore_index=True) if market_frames else pd.DataFrame(columns=["symbol", "name", "market"])
         out = out.drop_duplicates(subset=["symbol"]).sort_values("symbol").reset_index(drop=True)
         return out
 

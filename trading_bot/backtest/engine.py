@@ -248,6 +248,8 @@ class BacktestEngine:
             self.logger.info(f"데이터 로드 기간: {data_start_date} ~ {end_date} (워밍업 포함)")
         self.logger.info(f"초기 자본금: {self.initial_capital:,.0f}원")
         self.logger.info(f"대상 종목: {', '.join(symbols)}")
+        # 원본 후보 유니버스 보관
+        original_universe = list(symbols)
         
         # 데이터 소스 결정
         from trading_bot.backtest.data_source import BacktestDataSource
@@ -318,7 +320,7 @@ class BacktestEngine:
         if enable_universe_screening:
             try:
                 cfg = screening_config or ScreeningConfig()
-                selected_symbols, selected_df = screen_historical_data(
+                selected_symbols, selected_df, scored_df = screen_historical_data(
                     historical_data=historical_data,
                     cfg=cfg,
                     reference_start_date=start_date,
@@ -334,7 +336,28 @@ class BacktestEngine:
                     )
                     self.logger.info(f"선정 종목: {', '.join(symbols)}")
                 else:
-                    self.logger.warning("백테스트 유니버스 스크리닝 통과 종목 없음 - 원본 symbols 유지")
+                    # 스코어링된 종목들이 있으나 모두 필터 미통과인 경우, 원인 요약 출력
+                    if 'scored_df' in locals() and scored_df is not None and not scored_df.empty:
+                        total_scored = len(scored_df)
+                        passed_count = int(scored_df['passed'].sum()) if 'passed' in scored_df.columns else 0
+                        self.logger.warning(
+                            f"백테스트 스크리닝 결과: 총 계산 가능 종목 {total_scored}개, 통과 {passed_count}개 (요약 출력) - 원본 symbols 유지"
+                        )
+                        # 각 필터별 통과비율 출력 (존재하면)
+                        for col in ['pass_liquidity', 'pass_adx', 'pass_trend', 'pass_volatility']:
+                            if col in scored_df.columns:
+                                try:
+                                    pct = 100.0 * scored_df[col].sum() / max(1, total_scored)
+                                    self.logger.info(f"  {col}: {scored_df[col].sum()} / {total_scored} ({pct:.1f}%)")
+                                except Exception:
+                                    pass
+                        # 상위 몇 개의 스코어 요약을 DEBUG로 남김
+                        try:
+                            self.logger.debug(f"상위 스코어 요약(상위20):\n{scored_df.sort_values(['avg_trading_value_20','adx'], ascending=[False,False]).head(20).to_string(index=False)}")
+                        except Exception:
+                            pass
+                    else:
+                        self.logger.warning("백테스트 유니버스 스크리닝 통과 종목 없음 - 원본 symbols 유지 (계산 가능한 종목 없음)")
 
                 if selected_df is not None and not selected_df.empty:
                     self.logger.debug(f"백테스트 스크리닝 결과(상위):\n{selected_df.head(20).to_string(index=False)}")
@@ -515,10 +538,13 @@ class BacktestEngine:
         self.logger.info(f"MDD: {metrics['mdd_pct']:.2f}%")
         self.logger.info(f"총 거래: {metrics['total_trades']}회")
         
+        # 반환값에 스크리닝 전/후 유니버스 정보 포함
         return {
             'metrics': metrics,
             'equity_curve': self.equity_curve,
             'trades': self.trades,
             'final_positions': self.positions.copy(),
-            'final_cash': self.cash
+            'final_cash': self.cash,
+            'universe_before': original_universe,
+            'universe_after': list(symbols),
         }

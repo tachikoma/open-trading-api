@@ -274,6 +274,8 @@ def main():
         )
     else:
         print("  유니버스 스크리닝: OFF")
+    # 후보 유니버스(스크리닝 전) 명확 출력
+    print(f"  후보 유니버스 수(스크리닝 전): {len(symbols)}")
     print()
 
     screening_cfg = ScreeningConfig(
@@ -348,6 +350,15 @@ def main():
                 enable_universe_screening=args.enable_screening,
                 screening_config=screening_cfg,
             )
+        # 스크리닝 전/후 후보 수 출력(BacktestEngine에서 제공될 경우)
+        if results and isinstance(results, dict):
+            ub = results.get('universe_before')
+            ua = results.get('universe_after')
+            if ub is not None and ua is not None:
+                try:
+                    print(f"\n🔎 유니버스 스크리닝: {len(ub)} -> {len(ua)} (최종선정 {len(ua)}개)")
+                except Exception:
+                    pass
         
         if not results or not results.get('trades'):
             print("\n⚠️  경고: 거래 내역이 없습니다.")

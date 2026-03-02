@@ -208,6 +208,17 @@ LOSS_SELL_BLOCK_THRESHOLD_PERCENT = 5.0     # 손실 매도 제한 임계값 (%)
 - 주요 키:
   - `ENV_MODE`: `real` 또는 `demo`
   - `TRADING_ENABLED`: 실제 주문 활성화 여부 (`true`/`false`, `1`/`0`, `yes`/`no` 허용)
+  - `UNIVERSE_TARGET`: 유니버스 후보군 (`watchlist`, `kospi`, `kosdaq`, `kospi_kosdaq`, `all`, `kospi200`, `kosdaq150`, `kospi200_kosdaq150`)
+  - `UNIVERSE_REFRESH_DAILY`: 유니버스 CSV 일별 갱신 여부 (`true`/`false`, `1`/`0`, `yes`/`no` 허용)
+  - `UNIVERSE_MAX_SYMBOLS`: 유니버스 최대 종목 수 (`0`이면 무제한)
+  - `UNIVERSE_CACHE_DIR`: 유니버스 캐시 디렉토리 (상대경로는 프로젝트 루트 기준)
+  - `MA_SCREENING_ENABLED`: MA 스크리닝 활성화 여부 (`true`/`false`, `1`/`0`, `yes`/`no` 허용)
+  - `MA_SCREENING_MIN_AVG_VALUE`: 스크리닝 20일 평균 거래대금 최소값(원)
+  - `MA_SCREENING_ADX_THRESHOLD`: 스크리닝 ADX 최소값
+  - `MA_SCREENING_TREND_MA_PERIOD`: 스크리닝 장기 추세 MA 기간
+  - `MA_SCREENING_ATR_PCT_MIN`: 스크리닝 ATR% 최소값
+  - `MA_SCREENING_ATR_PCT_MAX`: 스크리닝 ATR% 최대값
+  - `MA_SCREENING_TOP_N`: 스크리닝 최종 선정 종목 수
   - `STOP_LOSS_PERCENT`: 고정 손절 비율(%)
   - `STOP_LOSS_COOLDOWN_ENABLED`: 손절 후 재진입 쿨다운 활성화 여부 (`true`/`false`, `1`/`0`, `yes`/`no` 허용)
   - `STOP_LOSS_COOLDOWN_DAYS`: 손절 후 재진입 제한 거래일 수
@@ -224,13 +235,24 @@ LOSS_SELL_BLOCK_THRESHOLD_PERCENT = 5.0     # 손실 매도 제한 임계값 (%)
 
 - 파일 위치(프로젝트 루트):
   - `./.env`  (실사용 파일 — 민감정보 포함 시 커밋 금지)
-  - `./.env.sample` (커밋 가능한 샘플 파일 — 저장소에 포함)
+  - `./.env.example` (커밋 가능한 샘플 파일 — 저장소에 포함)
 
 예시 `.env` (프로젝트 루트에 생성):
 
 ```
 ENV_MODE=demo
 TRADING_ENABLED=false
+UNIVERSE_TARGET=watchlist
+UNIVERSE_REFRESH_DAILY=1
+UNIVERSE_MAX_SYMBOLS=0
+UNIVERSE_CACHE_DIR=trading_bot/data/universe
+MA_SCREENING_ENABLED=0
+MA_SCREENING_MIN_AVG_VALUE=10000000000
+MA_SCREENING_ADX_THRESHOLD=25.0
+MA_SCREENING_TREND_MA_PERIOD=60
+MA_SCREENING_ATR_PCT_MIN=1.5
+MA_SCREENING_ATR_PCT_MAX=8.0
+MA_SCREENING_TOP_N=20
 STOP_LOSS_PERCENT=100.0
 STOP_LOSS_COOLDOWN_ENABLED=0
 STOP_LOSS_COOLDOWN_DAYS=5
@@ -238,7 +260,7 @@ LOSS_SELL_BLOCK_ENABLED=true
 LOSS_SELL_BLOCK_THRESHOLD_PERCENT=5.0
 ```
 
-`.env.sample`을 복사하여 `.env`로 변경한 뒤 값을 환경에 맞게 수정하세요.
+`.env.example`을 복사하여 `.env`로 변경한 뒤 값을 환경에 맞게 수정하세요.
 
 
 ### 4. 실행 방법
@@ -274,6 +296,14 @@ python3 run_bot.py
 > ```
 
 ## ⚙️ 사용 방법
+
+## 캐시 정책 (요약)
+
+- FinanceDataReader 기반 캐시는 `Config.FDR_CACHE_DIR`에 저장됩니다 (`trading_bot/data/fdr_cache` 기본).
+- 요청한 기간에서 누락된 구간만 증분 다운로드하여 기존 캐시와 병합합니다. 전체 재다운로드를 피해 재활성을 높입니다.
+- 병합 후 캐시 저장은 원자적(임시파일 → 교체)으로 수행되며, CSV 우선 저장 후 Parquet로 시도합니다.
+- 캐시 동작 상세 및 문제해결은 [CACHE_POLICY.md](./CACHE_POLICY.md)를 참고하세요.
+
 
 ### 기본 실행
 ```bash

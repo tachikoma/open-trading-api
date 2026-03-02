@@ -86,7 +86,8 @@ TRADING_ENABLED=false
 **⚠️ ENV_MODE를 변경할 때는 반드시 기존 토큰 파일을 삭제해야 합니다.**
 
 #### 문제점:
-KIS API는 토큰을 날짜별로 저장하지만, **서버 구분(prod/vps)이 파일명에 포함되지 않습니다**.
+KIS 기본 샘플(`examples_user/kis_auth.py`)은 토큰을 날짜별(`KISYYYYMMDD`)로 저장하므로,
+서버 구분(prod/vps)이 파일명에 포함되지 않습니다.
 
 ```bash
 # 토큰 파일 위치 및 이름
@@ -99,15 +100,35 @@ KIS API는 토큰을 날짜별로 저장하지만, **서버 구분(prod/vps)이 
 3. 봇 재시작 → **같은 파일에서 모의투자 토큰 읽음**
 4. 실전투자(prod) 서버에 모의투자 토큰 사용 → **인증 실패**
 
+#### 토큰 파일명 분리 동작 (trading_bot)
+
+`trading_bot`의 `KISBroker`는 위 충돌을 피하기 위해 실행 시점에 토큰 파일명을 모드별로 분리합니다.
+
+- `ENV_MODE=real` → `svr=prod` → `~/KIS/config/KISYYYYMMDD_prod`
+- `ENV_MODE=demo` → `svr=vps` → `~/KIS/config/KISYYYYMMDD_vps`
+
+즉, `read_token()` 함수 자체를 바꾸는 것이 아니라,
+`read_token()`이 참조하는 `token_tmp` 경로를 런타임에 모드별 파일로 교체해서 사용합니다.
+
+참고:
+- 기본 샘플 경로 정의: `examples_user/kis_auth.py`의 `token_tmp`
+- trading_bot 경로 교체: `trading_bot/broker/kis_broker.py`의 `setattr(ka, "token_tmp", ...)`
+
 #### 해결 방법:
 
 **ENV_MODE 변경 시 반드시 토큰 파일을 삭제하세요:**
 
 ```bash
-# 오늘 날짜의 토큰 파일 삭제
+# trading_bot 모드별 토큰 파일 삭제 (권장)
+rm ~/KIS/config/KIS$(date +%Y%m%d)_prod
+rm ~/KIS/config/KIS$(date +%Y%m%d)_vps
+
+# 레거시 파일명(접미사 없음)도 함께 정리
 rm ~/KIS/config/KIS$(date +%Y%m%d)
 
 # 예: 2026년 1월 6일
+rm ~/KIS/config/KIS20260106_prod
+rm ~/KIS/config/KIS20260106_vps
 rm ~/KIS/config/KIS20260106
 
 # 또는 모든 토큰 파일 삭제 (안전)
@@ -117,6 +138,8 @@ rm ~/KIS/config/KIS*
 **완전한 전환 절차:**
 ```bash
 # 1. 기존 토큰 파일 삭제
+rm ~/KIS/config/KIS$(date +%Y%m%d)_prod
+rm ~/KIS/config/KIS$(date +%Y%m%d)_vps
 rm ~/KIS/config/KIS$(date +%Y%m%d)
 
 # 2. config.py 수정
