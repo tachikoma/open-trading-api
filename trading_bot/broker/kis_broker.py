@@ -64,11 +64,92 @@ class KISBroker:
         self.env_mode = env_mode
         # thread-local storage for last API error payload captured by monkey-patch
         self._local = threading.local()
+
+        # 시작 시 설정값(모드/계좌/상품코드) 사전 검증
+        self._validate_startup_config()
         
         # KIS 인증 초기화
         self._init_auth()
         
         self.logger.info(f"KISBroker 초기화 완료 (모드: {self.env_mode})")
+
+    def _validate_startup_config(self):
+        """브로커 시작 전 설정값을 검증합니다.
+
+        검증 항목:
+        - env_mode(real/demo) 유효성
+        - 모드별 app key/secret 존재
+        - my_prod(상품코드) 유효성
+        - 상품코드에 맞는 계좌 번호 존재 및 형식(숫자 8자리)
+        """
+        cfg = getattr(ka, "_cfg", None)
+        if not isinstance(cfg, dict):
+            raise ValueError("KIS 설정 로드 실패: kis_devlp.yaml 파싱 결과가 유효하지 않습니다.")
+
+        errors = []
+        env_mode = str(self.env_mode).strip().lower()
+        if env_mode not in ("real", "demo"):
+            errors.append(f"ENV_MODE 값이 유효하지 않습니다: {self.env_mode!r} (허용: 'real' 또는 'demo')")
+
+        product = str(cfg.get("my_prod", "")).strip()
+        if not product:
+            errors.append("kis_devlp.yaml의 'my_prod'가 비어 있습니다.")
+        elif len(product) != 2 or not product.isdigit():
+            errors.append(f"'my_prod' 형식 오류: {product!r} (숫자 2자리 필요, 예: '01')")
+
+        if env_mode == "demo":
+            app_key_name = "paper_app"
+            app_secret_name = "paper_sec"
+            allowed_products = {"01", "03"}
+            if product == "03":
+                account_key_name = "my_paper_future"
+            else:
+                account_key_name = "my_paper_stock"
+        else:
+            app_key_name = "my_app"
+            app_secret_name = "my_sec"
+            allowed_products = {"01", "03", "08", "22", "29"}
+            if product in {"03", "08"}:
+                account_key_name = "my_acct_future"
+            else:
+                account_key_name = "my_acct_stock"
+
+        if product and product not in allowed_products:
+            mode_label = "demo(vps)" if env_mode == "demo" else "real(prod)"
+            errors.append(
+                f"{mode_label}에서 지원하지 않는 my_prod={product!r} 입니다. "
+                f"허용값: {sorted(allowed_products)}"
+            )
+
+        app_key = str(cfg.get(app_key_name, "")).strip()
+        app_secret = str(cfg.get(app_secret_name, "")).strip()
+        if not app_key:
+            errors.append(f"kis_devlp.yaml의 '{app_key_name}' 값이 비어 있습니다.")
+        if not app_secret:
+            errors.append(f"kis_devlp.yaml의 '{app_secret_name}' 값이 비어 있습니다.")
+
+        account = str(cfg.get(account_key_name, "")).strip()
+        if not account:
+            errors.append(
+                f"계좌번호 누락: ENV_MODE={env_mode!r}, my_prod={product!r} 조합에서 "
+                f"'{account_key_name}' 값이 필요합니다."
+            )
+        elif not (account.isdigit() and len(account) == 8):
+            errors.append(
+                f"계좌번호 형식 오류: '{account_key_name}'={account!r} (숫자 8자리 필요)"
+            )
+
+        if errors:
+            joined = "\n- " + "\n- ".join(errors)
+            raise ValueError(
+                "KIS 시작 전 설정 검증 실패" + joined +
+                "\n\n확인 파일: ~/KIS/config/kis_devlp.yaml"
+            )
+
+        # 운영 중 설정 확인을 쉽게 하기 위한 시작 로그(요청사항)
+        self.logger.info(
+            f"시작 설정: ENV_MODE={env_mode} / my_prod={product} / account_key={account_key_name}"
+        )
     
     def _init_auth(self):
         """KIS 인증 초기화
@@ -743,6 +824,10 @@ class KISBroker:
                     error_payload = result.attrs.get("error_payload")
                     if error_payload is not None:
                         error_msg = str(error_payload)
+                        # 계좌검증 오류
+                        if "invalid_check_acno" in error_msg.lower() or "check_acno" in error_msg.lower():
+                            self.logger.debug(f"계좌 검증 오류 감지: 재시도하지 않음")
+                            return False
                         # 호가단위 오류
                         if "호가단위" in error_msg or "호가 단위" in error_msg:
                             self.logger.debug(f"호가단위 오류 감지: 재시도하지 않음")
@@ -771,6 +856,10 @@ class KISBroker:
                         error_payload = r.attrs.get("error_payload")
                         if error_payload is not None:
                             error_msg = str(error_payload)
+                            # 계좌검증 오류
+                            if "invalid_check_acno" in error_msg.lower() or "check_acno" in error_msg.lower():
+                                self.logger.debug(f"계좌 검증 오류 감지: 재시도하지 않음")
+                                return False
                             # 호가단위 오류
                             if "호가단위" in error_msg or "호가 단위" in error_msg:
                                 self.logger.debug(f"호가단위 오류 감지: 재시도하지 않음")
