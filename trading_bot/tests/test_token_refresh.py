@@ -32,6 +32,7 @@ def test_token_refresh_on_result(tmp_path, monkeypatch):
 
     # _init_auth의 부작용 방지
     monkeypatch.setattr(kis_broker.KISBroker, "_init_auth", lambda self: None)
+    monkeypatch.setattr(kis_broker.KISBroker, "_validate_startup_config", lambda self: None)
 
     broker = kis_broker.KISBroker(env_mode="demo")
     broker._svr = "vps"
@@ -67,6 +68,7 @@ def test_token_refresh_on_exception(tmp_path, monkeypatch):
     monkeypatch.setattr(kis_broker.dsf, "inquire_price", fake_inquire_price_raise)
 
     monkeypatch.setattr(kis_broker.KISBroker, "_init_auth", lambda self: None)
+    monkeypatch.setattr(kis_broker.KISBroker, "_validate_startup_config", lambda self: None)
 
     broker = kis_broker.KISBroker(env_mode="demo")
     broker._svr = "vps"
@@ -172,3 +174,51 @@ def test_is_token_expired_response_from_dataframe_attrs_payload():
     }
 
     assert is_token_expired_response(df) is True
+
+
+def test_is_token_expired_response_false_on_invalid_check_acno_payload():
+    df = pd.DataFrame()
+    df.attrs["error_payload"] = {
+        "http_status": 200,
+        "http_body_truncated": "ERROR : INPUT INVALID_CHECK_ACNO",
+    }
+
+    assert is_token_expired_response(df) is False
+
+
+def test_is_token_expired_response_false_on_plain_403_text():
+    assert is_token_expired_response("HTTP 403 Forbidden") is False
+
+
+def test_startup_config_validation_raises_on_demo_invalid_account(monkeypatch):
+    class FakeKA:
+        _cfg = {
+            "my_prod": "01",
+            "paper_app": "demo-app-key",
+            "paper_sec": "demo-app-secret",
+            "my_paper_stock": "ABC12345",  # 숫자 8자리 아님
+        }
+
+    monkeypatch.setattr(kis_broker, "ka", FakeKA)
+
+    with pytest.raises(ValueError) as exc:
+        kis_broker.KISBroker(env_mode="demo")
+
+    assert "KIS 시작 전 설정 검증 실패" in str(exc.value)
+    assert "계좌번호 형식 오류" in str(exc.value)
+
+
+def test_startup_config_validation_passes_on_demo_valid(monkeypatch):
+    class FakeKA:
+        _cfg = {
+            "my_prod": "01",
+            "paper_app": "demo-app-key",
+            "paper_sec": "demo-app-secret",
+            "my_paper_stock": "12345678",
+        }
+
+    monkeypatch.setattr(kis_broker, "ka", FakeKA)
+    monkeypatch.setattr(kis_broker.KISBroker, "_init_auth", lambda self: None)
+
+    broker = kis_broker.KISBroker(env_mode="demo")
+    assert broker.env_mode == "demo"

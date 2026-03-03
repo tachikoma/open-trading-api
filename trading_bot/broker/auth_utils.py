@@ -8,17 +8,30 @@ class TokenRefreshError(Exception):
 
 def _contains_token_expired_keywords(text: str) -> bool:
     text = str(text).lower()
+    # 계좌/입력값 검증 오류는 토큰 만료로 분류하면 안 됩니다.
+    if "invalid_check_acno" in text:
+        return False
+    if "check_acno" in text:
+        return False
+
     if "egw00123" in text:
         return True
-    if "토큰" in text or "토큰이" in text or "만료" in text or "만료된" in text:
+    if "egw00121" in text:
         return True
-    if "token" in text and ("expire" in text or "expired" in text or "invalid" in text):
+    if "egw00124" in text:
         return True
-    if "access_token" in text or "access token" in text:
-        if "expired" in text or "expire" in text or "invalid" in text:
-            return True
-    if "401" in text or "403" in text or "unauthorized" in text:
+
+    if ("토큰" in text or "token" in text or "access_token" in text or "access token" in text) and (
+        "만료" in text or "만료된" in text or "유효하지" in text or "expire" in text or "expired" in text
+    ):
         return True
+
+    # 토큰 관련 문구가 명시된 unauthorized/invalid 케이스만 허용
+    if ("token" in text or "access_token" in text or "bearer" in text or "jwt" in text) and (
+        "unauthorized" in text or "invalid" in text
+    ):
+        return True
+
     return False
 
 

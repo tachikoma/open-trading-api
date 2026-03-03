@@ -71,6 +71,7 @@ def main():
         logger.info("\n사용자에 의해 중단되었습니다.")
     except Exception as e:
         logger.error(f"오류 발생: {e}", exc_info=True)
+        raise SystemExit(1)
     finally:
         logger.info("=" * 70)
         logger.info("KIS 자동매매 봇 종료")
