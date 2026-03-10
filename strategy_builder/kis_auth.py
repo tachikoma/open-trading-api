@@ -34,22 +34,70 @@ def clearConsole():
     return os.system("cls" if os.name in ("nt", "dos") else "clear")
 
 key_bytes = 32
+
+# 구성 파일/토큰 디렉토리 (사용자 홈), 없으면 폴더를 생성하여 방어적으로 처리
 config_root = os.path.join(os.path.expanduser("~"), "KIS", "config")
-# config_root = "$HOME/KIS/config/"  # 토큰 파일이 저장될 폴더, 제3자가 찾기 어렵도록 경로 설정하시기 바랍니다.
-# token_tmp = config_root + 'KIS000000'  # 토큰 로컬저장시 파일 이름 지정, 파일이름을 토큰값이 유추가능한 파일명은 삼가바랍니다.
-# token_tmp = config_root + 'KIS' + datetime.today().strftime("%Y%m%d%H%M%S")  # 토큰 로컬저장시 파일명 년월일시분초
-token_tmp = os.path.join(
-    config_root, f"KIS{datetime.today().strftime('%Y%m%d')}"
-)  # 토큰 로컬저장시 파일명 년월일
+try:
+    os.makedirs(config_root, exist_ok=True)
+except Exception:
+    # 디렉토리 생성이 실패하더라도 이후 파일 접근시 예외를 방어하기 위해 진행
+    pass
 
-# 접근토큰 관리하는 파일 존재여부 체크, 없으면 생성
-if not os.path.exists(token_tmp):
-    f = open(token_tmp, "w+")
+# 토큰 파일 경로
+token_tmp = os.path.join(config_root, f"KIS{datetime.today().strftime('%Y%m%d')}")
+try:
+    if not os.path.exists(token_tmp):
+        open(token_tmp, "w+").close()
+except Exception:
+    # 파일 생성 실패는 치명적이지 않으므로 무시
+    pass
 
-# 앱키, 앱시크리트, 토큰, 계좌번호 등 저장관리, 자신만의 경로와 파일명으로 설정하시기 바랍니다.
-# pip install PyYAML (패키지설치)
-with open(os.path.join(config_root, "kis_devlp.yaml"), encoding="UTF-8") as f:
-    _cfg = yaml.load(f, Loader=yaml.FullLoader)
+# 앱키/설정 로드: 우선 사용자 홈의 kis_devlp.yaml, 없으면 리포지토리 루트의 kis_devlp.yaml을 시도
+_cfg = {}
+cfg_loaded = False
+user_cfg_path = os.path.join(config_root, "kis_devlp.yaml")
+if os.path.exists(user_cfg_path):
+    try:
+        with open(user_cfg_path, encoding="UTF-8") as f:
+            _cfg = yaml.load(f, Loader=yaml.FullLoader) or {}
+            cfg_loaded = True
+    except Exception:
+        cfg_loaded = False
+
+if not cfg_loaded:
+    # 프로젝트 루트에 예시 파일이 있을 수 있으므로 상대 경로 폴백
+    repo_cfg_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "kis_devlp.yaml"))
+    if os.path.exists(repo_cfg_path):
+        try:
+            with open(repo_cfg_path, encoding="UTF-8") as f:
+                _cfg = yaml.load(f, Loader=yaml.FullLoader) or {}
+                cfg_loaded = True
+        except Exception:
+            cfg_loaded = False
+
+# 최소 기본값 보장 (키가 없어도 코드가 즉시 실패하지 않도록)
+_cfg_defaults = {
+    "my_agent": "kis-strategy-builder/1.0",
+    "my_app": "",
+    "my_sec": "",
+    "my_acct": "",
+    "my_prod": "01",
+    "my_htsid": "",
+    "my_token": "",
+    "my_url": "https://openapi.koreainvestment.com:9443",
+    "my_url_ws": "wss://openapi.koreainvestment.com:9443",
+    "paper_app": "",
+    "paper_sec": "",
+    "my_paper_stock": "",
+    "my_paper_future": "",
+    "ops": "",
+    "vops": "",
+    "vps": "https://openapivts.koreainvestment.com:29443",
+    "prod": "https://openapi.koreainvestment.com:9443",
+}
+for k, v in _cfg_defaults.items():
+    if k not in _cfg:
+        _cfg[k] = v
 
 _TRENV = tuple()
 _last_auth_time = datetime.now()
