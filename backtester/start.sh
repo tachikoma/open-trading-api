@@ -25,7 +25,7 @@ fi
 # Start backend
 cd "$SCRIPT_DIR"
 echo "[Backend] Starting on port 8002..."
-uv run python -m uvicorn backend.main:app --host 0.0.0.0 --port 8002 --reload &
+uv run python -m uvicorn backend.main:app --host 0.0.0.0 --port 8002 &
 BACKEND_PID=$!
 
 # Wait for backend
@@ -40,7 +40,7 @@ fi
 # Start frontend
 cd "$SCRIPT_DIR/frontend"
 echo "[Frontend] Starting on port 3001..."
-npm run dev &
+NEXT_PUBLIC_API_URL=http://localhost:8002 npm run dev &
 FRONTEND_PID=$!
 
 echo ""
