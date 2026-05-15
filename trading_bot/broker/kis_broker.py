@@ -1023,6 +1023,60 @@ class KISBroker:
         except Exception as e:
             self.logger.error(f"잔고 조회 실패: {e}")
             return None, None
+
+    def _get_avg_buy_price(self, symbol: str) -> Optional[float]:
+        """보유 종목에서 평균매수가 후보 칼럼을 찾아 반환합니다.
+
+        우선순위 칼럼: pchs_avg_pric, pchs_avg_pric_amt, avg_unpr, pchs_unpr, avg_buy_price
+        """
+        try:
+            df1, df2 = self.get_balance()
+            if df1 is None or df1.empty:
+                return None
+
+            # 가능한 심볼 컬럼 후보
+            sym_cols = ["pdno", "prdt_code", "isu_cd", "item_code", "symbol", "pd_no"]
+            sym_col = None
+            for c in sym_cols:
+                if c in df1.columns:
+                    sym_col = c
+                    break
+
+            # 기본적으로 'pdno'가 존재하는 경우가 많음
+            if sym_col is None and "pdno" in df1.columns:
+                sym_col = "pdno"
+
+            # 찾지 못하면 None 반환
+            if sym_col is None:
+                return None
+
+            matched = df1[df1[sym_col].astype(str) == str(symbol)] if sym_col in df1.columns else None
+            if matched is None or matched.empty:
+                return None
+
+            row = matched.iloc[0]
+
+            avg_price_keys = [
+                "pchs_avg_pric",
+                "pchs_avg_pric_amt",
+                "avg_unpr",
+                "pchs_unpr",
+                "avg_buy_price",
+            ]
+            for key in avg_price_keys:
+                try:
+                    if key in row:
+                        v = row.get(key)
+                        if v is None:
+                            continue
+                        val = float(v)
+                        if val > 0:
+                            return val
+                except Exception:
+                    continue
+            return None
+        except Exception:
+            return None
     
     def get_buyable_cash(self, symbol: str = "", price: int = 0) -> Optional[int]:
         """
@@ -1232,13 +1286,7 @@ class KISBroker:
                 except Exception:
                     pass
             
-            # 알림 전송 (성공)
-            try:
-                notify_order("BUY", symbol, qty, price, True, order_id=order_id, currency="KRW")
-            except Exception:
-                pass
-            
-            # 수수료/세금 계산: 가격이 0(시장가)이면 응답에서 체결가를 시도 추출
+            # 수수료/세금 계산: 가격이 0(시장가)이면 응답에서 체결가를 시도 추출 (접수 알림 전에 시도)
             exec_price = price
             try:
                 import pandas as _pd
@@ -1251,8 +1299,28 @@ class KISBroker:
                                 break
             except Exception:
                 pass
-            
+
+            # 접수(예상) 알림: 가능한 경우 추정 수수료 포함
+            try:
+                try:
+                    estimated_fees = calculate_fees_and_taxes(exec_price or price or 0, qty, side="buy")
+                except Exception:
+                    estimated_fees = None
+                notify_order("BUY", symbol, qty, price, True, order_id=order_id, currency="KRW",
+                             fees=estimated_fees, estimated=True, stage="receipt")
+            except Exception:
+                pass
+
+            # 최종 수수료 계산 및 응답
             fees = calculate_fees_and_taxes(exec_price or 0, qty, side="buy")
+
+            # 체결(최종) 상세 알림
+            try:
+                notify_order("BUY", symbol, qty, price, True, order_id=order_id, currency="KRW",
+                             fees=fees, exec_price=(exec_price or price), stage="execution", is_final=True)
+            except Exception:
+                pass
+
             return self._format_order_response(True, result, qty=qty, price=exec_price or price, order_id=order_id, side="buy", fees=fees)
         except Exception as e:
             self.logger.error(f"매수 주문 실패 ({symbol}): {e}")
@@ -1339,12 +1407,7 @@ class KISBroker:
                     pass
             
             # 알림 전송 (성공)
-            try:
-                notify_order("SELL", symbol, qty, price, True, order_id=order_id, currency="KRW")
-            except Exception:
-                pass
-            
-            # 수수료/세금 계산: 가격이 0(시장가)이면 응답에서 체결가를 시도 추출
+            # 수수료/세금 계산: 가격이 0(시장가)이면 응답에서 체결가를 시도 추출 (접수 알림 전에 시도)
             exec_price = price
             try:
                 import pandas as _pd
@@ -1357,8 +1420,36 @@ class KISBroker:
                                 break
             except Exception:
                 pass
-            
+
+            # 접수(예상) 알림: 가능한 경우 추정 수수료 포함
+            try:
+                try:
+                    estimated_fees = calculate_fees_and_taxes(exec_price or price or 0, qty, side="sell")
+                except Exception:
+                    estimated_fees = None
+                notify_order("SELL", symbol, qty, price, True, order_id=order_id, currency="KRW",
+                             fees=estimated_fees, estimated=True, stage="receipt")
+            except Exception:
+                pass
+
+            # 최종 수수료 계산 및 응답
             fees = calculate_fees_and_taxes(exec_price or 0, qty, side="sell")
+
+            # 평균매수가 시도 획득
+            avg_buy_price = None
+            try:
+                avg_buy_price = self._get_avg_buy_price(symbol)
+            except Exception:
+                avg_buy_price = None
+
+            # 체결(최종) 상세 알림 (매도시 avg_buy_price가 있으면 수익률 표기)
+            try:
+                notify_order("SELL", symbol, qty, price, True, order_id=order_id, currency="KRW",
+                             fees=fees, exec_price=(exec_price or price), avg_buy_price=avg_buy_price,
+                             stage="execution", is_final=True)
+            except Exception:
+                pass
+
             return self._format_order_response(True, result, qty=qty, price=exec_price or price, order_id=order_id, side="sell", fees=fees)
         except Exception as e:
             self.logger.error(f"매도 주문 실패 ({symbol}): {e}")

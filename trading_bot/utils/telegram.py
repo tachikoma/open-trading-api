@@ -5,7 +5,7 @@
 - 가능한 경우 `requests`를 사용하고, 없으면 `urllib`로 대체합니다.
 - 내부 예외는 모두 잡아서 로깅으로 처리하므로 호출자에서 예외가 발생하지 않습니다.
 """
-from typing import Optional
+from typing import Optional, Dict
 import logging
 import json
 
@@ -20,6 +20,7 @@ except Exception:
 from trading_bot.config import Config
 from trading_bot.utils.symbols import format_symbol
 from trading_bot.utils.format import format_quantity, format_price
+from trading_bot.utils.fees import calculate_fees_and_taxes
 
 logger = logging.getLogger("Telegram")
 
@@ -90,33 +91,111 @@ def _html_escape(s: str) -> str:
              .replace(">", "&gt;"))
 
 
-def notify_order(action: str, symbol: str, qty: int, price: int, success: bool, 
-                 message: Optional[str] = None, order_id: Optional[str] = None, currency: str = "KRW"):
+def _format_krw(value) -> str:
+    try:
+        if value is None:
+            return ""
+        return f"{int(round(float(value))):,}원"
+    except Exception:
+        try:
+            return str(value)
+        except Exception:
+            return ""
+
+
+def notify_order(action: str, symbol: str, qty: int, price: int, success: bool,
+                 message: Optional[str] = None, order_id: Optional[str] = None,
+                 currency: str = "KRW", fees: Optional[Dict] = None,
+                 exec_price: Optional[int] = None, avg_buy_price: Optional[float] = None,
+                 stage: str = "receipt", estimated: bool = False, is_final: bool = False,
+                 extras: Optional[Dict] = None):
     """주문 알림 메시지를 HTML 안전하게 포맷하여 전송합니다.
 
-    인자:
-        action: 'BUY' 또는 'SELL' 등의 액션 문자열
-        symbol: 종목 코드
-        qty: 수량
-        price: 가격
-        success: 성공 여부
-        message: 선택적 상세 메시지
-        order_id: 선택적 주문 ID
-        currency: 통화 ('KRW', 'USD' 등). 기본값 'KRW'
+    확장된 인자:
+      - fees: calculate_fees_and_taxes 반환 형식의 dict
+      - exec_price: 체결 가격(있을 경우)
+      - avg_buy_price: 보유중 평균매수가 (체결시 수익률 계산용)
+      - stage: 'receipt' 또는 'execution' 등의 구분
+      - estimated: 접수 시 추정치 표시 여부
+      - is_final: 최종 체결 알림 여부
+      - extras: 여분의 정보 딕셔너리
     """
     display = format_symbol(symbol)
-    status = "성공" if success else "실패"
-    # HTML 이스케이프 처리
+    # header 결정
+    if is_final:
+        header = "주문 체결" if success else "주문 실패"
+    else:
+        header = "주문 접수" if success else "주문 실패"
+
     display_e = _html_escape(display)
-    msg_parts = [f"<b>{_html_escape(action)}</b> {display_e}"]
-    formatted_qty = format_quantity(qty)
-    formatted_price = format_price(price, currency=currency)
-    msg_parts.append(f"qty={_html_escape(formatted_qty)} price={_html_escape(formatted_price)} — <b>{_html_escape(status)}</b>")
+    action_e = _html_escape(action)
+    status_e = _html_escape("성공" if success else "실패")
+
+    msg_parts = [f"<b>{_html_escape(header)}</b> {action_e} {display_e}"]
+
+    # 수량 및 가격 정보
+    try:
+        formatted_qty = format_quantity(qty)
+    except Exception:
+        formatted_qty = str(qty)
+
+    if is_final and exec_price:
+        msg_parts.append(f"체결가: <b>{_html_escape(_format_krw(exec_price))}</b>")
+    else:
+        if price and int(price) > 0:
+            msg_parts.append(f"주문가: {_html_escape(_format_krw(price))}")
+        else:
+            msg_parts.append("주문가: 시장가")
+
+    msg_parts.append(f"수량: {_html_escape(formatted_qty)}")
+
     if order_id:
         msg_parts.append(f"Order ID: <code>{_html_escape(str(order_id))}</code>")
+
     if message:
         msg_parts.append(_html_escape(str(message)))
 
+    # 접수(추정) 시 표시: 예상비용 / 예상수령
+    if not is_final and estimated and fees:
+        try:
+            total_fees = fees.get("total_fees")
+            net_amount = fees.get("net_amount")
+            if str(action).strip().lower().startswith("buy"):
+                if total_fees is not None:
+                    msg_parts.append(f"예상비용(수수료+세금): {_html_escape(_format_krw(total_fees))}")
+            else:
+                if net_amount is not None:
+                    tf = _format_krw(total_fees) if total_fees is not None else ""
+                    msg_parts.append(f"예상수령: {_html_escape(_format_krw(net_amount))} (수수료+세금: {_html_escape(tf)})")
+        except Exception:
+            pass
+
+    # 체결(최종) 표시: 체결가, 수수료, net, 예상수익률(매도시 avg_buy_price 있으면)
+    if is_final:
+        try:
+            if fees is not None:
+                total_fees = fees.get("total_fees")
+                net_amount = fees.get("net_amount")
+                if total_fees is not None:
+                    msg_parts.append(f"수수료+세금: {_html_escape(_format_krw(total_fees))}")
+                if net_amount is not None:
+                    msg_parts.append(f"예상수령: {_html_escape(_format_krw(net_amount))} (수수료+세금: {_html_escape(_format_krw(total_fees))})")
+
+            # 매도일 때 평균매수가 주어지면 예상수익률 계산
+            if str(action).strip().lower().startswith("sell") and avg_buy_price:
+                try:
+                    # buy쪽 추정 수수료
+                    buy_fees = calculate_fees_and_taxes(int(round(float(avg_buy_price))), int(qty), side="buy")
+                    buy_fees_total = buy_fees.get("total_fees", 0)
+                    buy_cost_total = int(round(float(avg_buy_price))) * int(qty) + int(buy_fees_total)
+                    if fees is not None and fees.get("net_amount") is not None and buy_cost_total > 0:
+                        expected_net_receive = int(fees.get("net_amount"))
+                        pnl_pct = (expected_net_receive - buy_cost_total) / float(buy_cost_total) * 100.0
+                        msg_parts.append(f"예상수익률: {pnl_pct:.2f}%")
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
     text = "\n".join(msg_parts)
-    # HTML 파싱 모드로 전송
     send_telegram_message(text, parse_mode="HTML")
