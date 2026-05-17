@@ -33,6 +33,7 @@ spec.loader.exec_module(ka)
 sys.modules["kis_auth"] = ka
 
 from domestic_stock import domestic_stock_functions as dsf
+from domestic_stock import domestic_stock_functions_ws as dsw
 
 # trading_bot 모듈 import (절대 경로)
 from trading_bot.config import Config
@@ -65,6 +66,16 @@ class KISBroker:
         # thread-local storage for last API error payload captured by monkey-patch
         self._local = threading.local()
 
+        # WebSocket 관련 상태
+        self._kws = None
+        self._ws_thread = None
+        self._ws_running = False
+        self._ws_lock = threading.Lock()
+        # order_id -> set(stages notified e.g. {'receipt','execution'})
+        self._ws_handled_orders: dict = {}
+        # order aggregation for partial fills: order_id -> {order_qty, filled_qty, filled_value, symbol, side}
+        self._ws_order_agg: dict = {}
+
         # 시작 시 설정값(모드/계좌/상품코드) 사전 검증
         self._validate_startup_config()
         
@@ -72,6 +83,209 @@ class KISBroker:
         self._init_auth()
         
         self.logger.info(f"KISBroker 초기화 완료 (모드: {self.env_mode})")
+
+    def start_ws_listener(self, api_url: str = "/tryitout"):
+        """
+        백그라운드에서 KIS WebSocket을 실행하고 주문/체결 통보를 구독합니다.
+
+        - 기본 구독: 국내주식 `ccnl_notice` (계정 HTSID 기반)
+        - on_result 콜백은 `_on_ws_result`로 연결됩니다.
+        """
+        if getattr(self, "_kws", None) is not None:
+            self.logger.info("WebSocket listener already running")
+            return
+
+        try:
+            # 웹소켓 인증(토큰/세션 준비)
+            ka.auth_ws()
+            trenv = ka.getTREnv()
+            my_htsid = getattr(trenv, "my_htsid", None)
+
+            self._kws = ka.KISWebSocket(api_url=api_url)
+
+            # 구독: 주문/체결 통보
+            env_dv = "real" if self.env_mode == "real" else "demo"
+            try:
+                self._kws.subscribe(request=dsw.ccnl_notice, data=[my_htsid], kwargs={"env_dv": env_dv})
+            except Exception as e:
+                self.logger.warning(f"WebSocket subscribe failed: {e}")
+
+            def _run():
+                try:
+                    self._kws.start(on_result=self._on_ws_result)
+                except Exception as e:
+                    self.logger.error(f"WebSocket runner stopped: {e}")
+
+            self._ws_thread = threading.Thread(target=_run, daemon=True)
+            self._ws_thread.start()
+            self._ws_running = True
+            self.logger.info("WebSocket listener started")
+        except Exception as e:
+            self.logger.error(f"WebSocket start failed: {e}")
+            self._kws = None
+            raise
+
+    def stop_ws_listener(self):
+        """
+        WebSocket 중지 요청 (best-effort).
+        """
+        try:
+            if getattr(self, "_kws", None) is None:
+                return
+            # KISWebSocket에는 명시적 stop()이 없으므로 상태 플래그만 설정
+            self._ws_running = False
+            self._kws = None
+            self.logger.info("WebSocket listener stop requested")
+        except Exception as e:
+            self.logger.warning(f"WebSocket stop error: {e}")
+
+    def _on_ws_result(self, ws, tr_id: str, result: pd.DataFrame, data_map: dict):
+        """
+        WebSocket 수신 콜백
+
+        - `ccnl_notice` 형식의 DataFrame을 파싱하여
+          접수(CNTG_YN==1) / 체결(CNTG_YN==2) 이벤트에 대해
+          `notify_order`를 호출합니다.
+        - 중복 알림을 방지하기 위해 order_id(ODER_NO)를 키로 상태를 추적합니다.
+        """
+        try:
+            if result is None or (hasattr(result, 'empty') and result.empty):
+                return
+        except Exception:
+            return
+
+        try:
+            for _idx, row in result.iterrows():
+                try:
+                    rowd = row.to_dict()
+
+                    # 기본 필드 추출
+                    order_no = (rowd.get('ODER_NO') or rowd.get('order_no') or '')
+                    order_no = str(order_no).strip() if order_no is not None else ''
+                    cntg_yn = str(rowd.get('CNTG_YN') or '').strip()
+                    symbol = rowd.get('STCK_SHRN_ISCD') or rowd.get('stck_shrn_iscd')
+                    try:
+                        qty = int(rowd.get('CNTG_QTY') or rowd.get('ODER_QTY') or 0)
+                    except Exception:
+                        try:
+                            qty = int(float(rowd.get('CNTG_QTY') or rowd.get('ODER_QTY') or 0))
+                        except Exception:
+                            qty = 0
+                    try:
+                        price = int(rowd.get('CNTG_UNPR') or rowd.get('ODER_PRC') or 0)
+                    except Exception:
+                        try:
+                            price = int(float(rowd.get('CNTG_UNPR') or rowd.get('ODER_PRC') or 0))
+                        except Exception:
+                            price = 0
+
+                    # 매수/매도 판정: SELN_BYOV_CLS 컬럼에 매도/매수 구분이 들어있음
+                    side_raw = rowd.get('SELN_BYOV_CLS') or rowd.get('seln_byov_cls') or ''
+                    side = None
+                    try:
+                        s = str(side_raw).strip()
+                        if s.startswith('2') or s.lower().startswith('s'):
+                            side = 'SELL'
+                        else:
+                            side = 'BUY'
+                    except Exception:
+                        side = 'BUY'
+
+                    # 체결 알림 (CNTG_YN == '2') - 부분체결 집계 후 최종 알림만 전송
+                    if cntg_yn in ('2', '02'):
+                        # require order_no to aggregate; if missing, send immediate final notification
+                        if not order_no:
+                            try:
+                                fees = calculate_fees_and_taxes(price or 0, qty or 0, side=side.lower())
+                            except Exception:
+                                fees = None
+                            avg_buy_price = None
+                            try:
+                                if side == 'SELL':
+                                    avg_buy_price = self._get_avg_buy_price(symbol)
+                            except Exception:
+                                avg_buy_price = None
+                            try:
+                                notify_order(side, symbol, qty, price, True, order_id=None, currency='KRW',
+                                             fees=fees, exec_price=price, avg_buy_price=avg_buy_price,
+                                             stage='execution', is_final=True)
+                            except Exception:
+                                pass
+                            continue
+
+                        try:
+                            order_qty = int(rowd.get('ODER_QTY') or 0)
+                        except Exception:
+                            try:
+                                order_qty = int(float(rowd.get('ODER_QTY') or 0))
+                            except Exception:
+                                order_qty = 0
+
+                        try:
+                            exec_qty = int(rowd.get('CNTG_QTY') or 0)
+                        except Exception:
+                            try:
+                                exec_qty = int(float(rowd.get('CNTG_QTY') or 0))
+                            except Exception:
+                                exec_qty = 0
+
+                        exec_price = price or 0
+
+                        with self._ws_lock:
+                            agg = self._ws_order_agg.setdefault(order_no, {
+                                'order_qty': order_qty,
+                                'filled_qty': 0,
+                                'filled_value': 0,
+                                'symbol': symbol,
+                                'side': side,
+                            })
+                            agg['filled_qty'] += exec_qty
+                            agg['filled_value'] += (exec_qty * exec_price)
+
+                            # 최종체결 판단: 주문수량이 주어졌고 누적 체결량이 >= 주문수량인 경우
+                            is_final = False
+                            if agg['order_qty'] and agg['filled_qty'] >= agg['order_qty']:
+                                is_final = True
+
+                        # 최종체결일 때만 알림 전송
+                        if is_final:
+                            with self._ws_lock:
+                                agg = self._ws_order_agg.pop(order_no, None)
+                                # mark executed to avoid duplicates
+                                self._ws_handled_orders.setdefault(order_no, set()).add('execution')
+
+                            if agg is None:
+                                continue
+
+                            filled_qty = agg.get('filled_qty', 0) or 0
+                            filled_value = agg.get('filled_value', 0) or 0
+                            try:
+                                avg_exec_price = int(round(filled_value / filled_qty)) if filled_qty else exec_price
+                            except Exception:
+                                avg_exec_price = exec_price
+
+                            try:
+                                fees = calculate_fees_and_taxes(avg_exec_price or 0, filled_qty or 0, side=side.lower())
+                            except Exception:
+                                fees = None
+
+                            avg_buy_price = None
+                            try:
+                                if side == 'SELL':
+                                    avg_buy_price = self._get_avg_buy_price(symbol)
+                            except Exception:
+                                avg_buy_price = None
+
+                            try:
+                                notify_order(side, symbol, filled_qty, avg_exec_price, True, order_id=order_no or None, currency='KRW',
+                                             fees=fees, exec_price=avg_exec_price, avg_buy_price=avg_buy_price,
+                                             stage='execution', is_final=True)
+                            except Exception:
+                                pass
+                except Exception as ex_row:
+                    self.logger.debug(f"WS row handling error: {ex_row}")
+        except Exception as ex:
+            self.logger.error(f"WebSocket result handler error: {ex}")
 
     def _validate_startup_config(self):
         """브로커 시작 전 설정값을 검증합니다.
@@ -1300,27 +1514,8 @@ class KISBroker:
             except Exception:
                 pass
 
-            # 접수(예상) 알림: 가능한 경우 추정 수수료 포함
-            try:
-                try:
-                    estimated_fees = calculate_fees_and_taxes(exec_price or price or 0, qty, side="buy")
-                except Exception:
-                    estimated_fees = None
-                notify_order("BUY", symbol, qty, price, True, order_id=order_id, currency="KRW",
-                             fees=estimated_fees, estimated=True, stage="receipt")
-            except Exception:
-                pass
-
-            # 최종 수수료 계산 및 응답
+            # 수수료/세금 계산 후 응답 반환 (알림은 WebSocket 최종체결에서 전송)
             fees = calculate_fees_and_taxes(exec_price or 0, qty, side="buy")
-
-            # 체결(최종) 상세 알림
-            try:
-                notify_order("BUY", symbol, qty, price, True, order_id=order_id, currency="KRW",
-                             fees=fees, exec_price=(exec_price or price), stage="execution", is_final=True)
-            except Exception:
-                pass
-
             return self._format_order_response(True, result, qty=qty, price=exec_price or price, order_id=order_id, side="buy", fees=fees)
         except Exception as e:
             self.logger.error(f"매수 주문 실패 ({symbol}): {e}")
@@ -1334,30 +1529,27 @@ class KISBroker:
     def sell(self, symbol: str, qty: int, price: int = 0, order_type: str = "00") -> Optional[Dict]:
         """
         매도 주문
-        
+
         Args:
             symbol: 종목코드
             qty: 수량
             price: 가격 (0이면 시장가)
             order_type: 주문유형 (00:지정가, 01:시장가)
-        
+
         Returns:
             주문 결과 dict
         """
         if not Config.TRADING_ENABLED:
             self.logger.warning(f"[DRY RUN] 매도 주문: {symbol}, 수량: {qty}, 가격: {price}")
             return self._format_order_response(False, None, qty=qty, price=price, side="sell", message="TRADING_ENABLED=False")
-        
+
         try:
             # 지정가 주문인 경우 호가 단위 검증 및 조정
             original_price = price
             if order_type == "00" and price > 0:
-                # 호가 단위 검증
                 is_valid, error_msg = self._validate_price_tick_unit(price, env_mode=self.env_mode)
                 if not is_valid:
                     self.logger.warning(f"[호가 단위] {symbol} 매도 주문: {error_msg}")
-                
-                # 호가 단위에 맞게 가격 조정
                 adjusted_price = self._adjust_price_to_tick_unit(price, env_mode=self.env_mode)
                 if adjusted_price != original_price:
                     self.logger.info(
@@ -1365,7 +1557,7 @@ class KISBroker:
                         f"(호가 단위: {self._get_tick_unit(original_price, self.env_mode)}원)"
                     )
                 price = adjusted_price
-            
+
             result = self._call_with_retry(
                 dsf.order_cash,
                 env_dv=self.env_mode,
@@ -1379,9 +1571,9 @@ class KISBroker:
                 excg_id_dvsn_cd=Config.DEFAULT_EXCHANGE,
                 check_result=self._check_retry_on_empty_or_rate_limit
             )
-            
+
             self.logger.info(f"매도 주문 완료: {symbol}, 수량: {qty}, 가격: {price}")
-            
+
             # 시도: result에서 주문ID 추출
             order_id = None
             try:
@@ -1405,9 +1597,8 @@ class KISBroker:
                                 break
                 except Exception:
                     pass
-            
-            # 알림 전송 (성공)
-            # 수수료/세금 계산: 가격이 0(시장가)이면 응답에서 체결가를 시도 추출 (접수 알림 전에 시도)
+
+            # 수수료/세금 계산: 가격이 0(시장가)이면 응답에서 체결가를 시도 추출
             exec_price = price
             try:
                 import pandas as _pd
@@ -1421,35 +1612,7 @@ class KISBroker:
             except Exception:
                 pass
 
-            # 접수(예상) 알림: 가능한 경우 추정 수수료 포함
-            try:
-                try:
-                    estimated_fees = calculate_fees_and_taxes(exec_price or price or 0, qty, side="sell")
-                except Exception:
-                    estimated_fees = None
-                notify_order("SELL", symbol, qty, price, True, order_id=order_id, currency="KRW",
-                             fees=estimated_fees, estimated=True, stage="receipt")
-            except Exception:
-                pass
-
-            # 최종 수수료 계산 및 응답
             fees = calculate_fees_and_taxes(exec_price or 0, qty, side="sell")
-
-            # 평균매수가 시도 획득
-            avg_buy_price = None
-            try:
-                avg_buy_price = self._get_avg_buy_price(symbol)
-            except Exception:
-                avg_buy_price = None
-
-            # 체결(최종) 상세 알림 (매도시 avg_buy_price가 있으면 수익률 표기)
-            try:
-                notify_order("SELL", symbol, qty, price, True, order_id=order_id, currency="KRW",
-                             fees=fees, exec_price=(exec_price or price), avg_buy_price=avg_buy_price,
-                             stage="execution", is_final=True)
-            except Exception:
-                pass
-
             return self._format_order_response(True, result, qty=qty, price=exec_price or price, order_id=order_id, side="sell", fees=fees)
         except Exception as e:
             self.logger.error(f"매도 주문 실패 ({symbol}): {e}")
